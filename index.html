@@ -2130,22 +2130,11 @@ function selectCell(row, col, focusInput) {
   document.getElementById('answerFeedback').textContent = '';
   document.getElementById('answerFeedback').className = 'answer-feedback';
   renderGrid();
-  scrollSelectedIntoView(row, col);
-}
-
-// The grid is now always a scrollable column (see computeCellSize()/the
-// .game-wrap rule) and can run taller than the screen at any width — this
-// follows the current selection so climbing upward
-// scrolls the view up with it instead of leaving the player to hunt for
-// their own selected space. renderGrid() rebuilds every cell <div> fresh on
-// every call, so this must run AFTER that render, against the fresh node.
-// scrollIntoView is absent in the test harness's stub DOM (and on any
-// browser too old to have it) — both are just a silent no-op here.
-function scrollSelectedIntoView(row, col) {
-  const el = document.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
-  if (el && typeof el.scrollIntoView === 'function') {
-    el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
-  }
+  // Selecting a cell used to also auto-scroll it into view every time —
+  // Alan: "I don't like the way when I click a cell it now recentres the
+  // page and moves the page." Removed: the view now only moves when he
+  // moves it himself (the scroll-pad arrows, a trackpad swipe, or the
+  // scrollbar — see .game-wrap/#scrollPad/scrollGameWrap()).
 }
 
 // The four floating scroll-pad buttons (see .scroll-pad-btn / #scrollPad) —
