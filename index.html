@@ -307,17 +307,30 @@ input, select { font-family: inherit; }
   padding: 0 3px;
   pointer-events: none;
 }
-/* Which half of the answer UI shows is now decided per-selected-cell, not
-   fixed for the whole climb: overall inputMode picks click vs. type, but an
-   E→J cell always forces click (see cellForcesClick()/selectCell()) even on
-   a "type" climb. #appRoot.show-choices is toggled fresh on every selection. */
+/* The choice panel is always the answer UI now — Alan: "no entry and submit
+   box", removing the old typed-answer alternative entirely (inputMode has
+   stayed permanently 'click' since the earlier touch-only change; this
+   just also removes the now-pointless typing UI/markup instead of leaving
+   it hidden dead code). #appRoot.show-choices stays toggled on every
+   selection since cellForcesClick() still exists as a concept internally. */
 .choices-panel { display: none; }
 #appRoot.show-choices .choices-panel { display: flex; }
-.answer-bar-row { display: none; }
-#appRoot:not(.show-choices) .answer-bar-row { display: flex; }
 @media (max-width: 820px) {
   .play-area { flex-direction: column; overflow: auto; }
   .choices-panel { width: 100%; max-height: 160px; border-left: none; border-top: 1px solid var(--border); flex-direction: row; flex-wrap: wrap; }
+  /* On a phone there isn't room to shrink 10 rows down to fit the visible
+     height without the cells becoming unreadably tiny (Alan: "much too
+     small"). Below this width, computeCellSize() sizes cells by width alone
+     and lets the grid run taller than the screen — this scrolls to it
+     instead of squashing it, with align-items switched to flex-start so the
+     top rows (the peak) stay reachable by scrolling up, rather than getting
+     centered partly off-screen with no way to scroll to it (see
+     selectCell()'s scrollIntoView, which follows the current selection). */
+  .game-wrap {
+    align-items: flex-start;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
 }
 #grid {
   display: flex;
@@ -486,19 +499,6 @@ input, select { font-family: inherit; }
 .answer-bar-kanji { font-size: 1.9rem; font-weight: 700; color: var(--goldlit); min-width: 50px; max-width: 45%; text-align: center; line-height: 1.15; word-break: break-word; }
 .answer-bar-fields { flex: 1; min-width: 200px; }
 .answer-bar-hint { font-size: .72rem; color: var(--muted); margin-bottom: 5px; }
-.answer-bar-row { display: flex; gap: 10px; }
-.answer-bar-input {
-  flex: 1;
-  background: var(--bg3);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  color: var(--text);
-  font-size: 1rem;
-  padding: 10px 12px;
-  outline: none;
-}
-.answer-bar-input:focus { border-color: var(--blue); }
-.answer-bar-row button { padding: 10px 18px; border-radius: 10px; font-size: .82rem; font-weight: 600; }
 .answer-feedback { font-size: .76rem; margin-top: 5px; min-height: 15px; }
 .answer-feedback.correct { color: var(--green); }
 .answer-feedback.incorrect { color: var(--redlit); }
@@ -621,8 +621,6 @@ input, select { font-family: inherit; }
     <div class="key-help-row"><kbd>T</kbd><kbd>U</kbd><span>Up-left / Up-right</span></div>
     <div class="key-help-row"><kbd>G</kbd><kbd>H</kbd><span>Left / Right</span></div>
     <div class="key-help-row"><kbd>V</kbd><kbd>N</kbd><span>Down-left / Down-right</span></div>
-    <div class="key-help-sep"></div>
-    <div class="key-help-row"><kbd>⏎</kbd><span>Focus the answer box</span></div>
   </div>
   <header class="hdr">
     <div class="hdr-title">⛰️ 天下の階段<span class="hdr-subtitle">The Stairway of Japanese Legends</span></div>
@@ -646,10 +644,6 @@ input, select { font-family: inherit; }
     <div class="answer-bar-kanji" id="barKanji">—</div>
     <div class="answer-bar-fields">
       <div class="answer-bar-hint" id="barHint">Use G/H/T/U/V/N to choose a space</div>
-      <div class="answer-bar-row">
-        <input class="answer-bar-input" id="answerInput" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Type your answer…">
-        <button class="hdr-btn primary" id="btnAnswerSubmit">Submit</button>
-      </div>
       <div class="answer-feedback" id="answerFeedback"></div>
     </div>
   </div>
@@ -1317,12 +1311,12 @@ let ROW_LENGTHS = [];
 // COMPOUND_STAGE_MODE_POOLS above), assigned cell-by-cell in newGrid().
 // 'click' | 'type' — the setup screen no longer offers a choice (Alan:
 // "the ability to select from touch on the screen - no input option
-// necessary"), so this always stays 'click' now — touch and mouse clicks
-// both fire the same click events, so nothing else needs to change for
-// mobile. The 'type' branches deeper in the file (the answer-bar text
-// input, the Enter-to-submit keydown handler) are harmless dead code left
-// in place rather than ripped out, in case a keyboard-entry mode is ever
-// wanted again for a desktop-only build.
+// necessary"), so this always stays 'click' now. The old 'type' path (a
+// typed-answer text box + Submit button in the answer bar) has since been
+// removed entirely too (Alan: "no entry and submit box" — see selectCell()/
+// checkAnswer()), so 'click' is now the only mode this variable can ever
+// hold — kept as a named constant-in-spirit rather than inlined, since
+// cellForcesClick()/showChoices still read it.
 let inputMode = 'click';
 // 'kanji' | 'compounds' — which sheet/item family this climb draws from,
 // chosen via the setup-screen tabs (see setupTab below) and locked in at
@@ -1811,6 +1805,11 @@ document.getElementById('choicesPanel').addEventListener('click', (e) => {
   handleChoiceClick(Number(btn.dataset.idx));
 });
 
+// The width threshold below which the game area switches to a single
+// scrollable column (matches the .play-area/.game-wrap phone breakpoint in
+// the CSS — see the "@media (max-width: 820px)" block).
+const NARROW_LAYOUT_PX = 820;
+
 function computeCellSize() {
   const gridEl = document.getElementById('grid');
   const wrap = gridEl.parentElement;
@@ -1818,13 +1817,23 @@ function computeCellSize() {
   const rows = ROW_LENGTHS.length || 1;
   const gap = 8;
   const pad = 36; // roughly matches .game-wrap's own padding on each axis
-  const availW = (wrap && typeof wrap.clientWidth === 'number' && wrap.clientWidth > 0) ? wrap.clientWidth - pad : 600;
+  const rawW = (wrap && typeof wrap.clientWidth === 'number' && wrap.clientWidth > 0) ? wrap.clientWidth : 600;
+  const availW = rawW - pad;
   const availH = (wrap && typeof wrap.clientHeight === 'number' && wrap.clientHeight > 0) ? wrap.clientHeight - pad : 600;
-  // Fit BOTH dimensions at once ("contain", not just width) so the whole
-  // diamond — however tall — always fits on screen with no scrolling.
   const sizeByWidth  = Math.floor((availW - (peakWidth - 1) * gap) / peakWidth);
   const sizeByHeight = Math.floor((availH - (rows - 1) * gap) / rows);
-  let size = Math.min(sizeByWidth, sizeByHeight);
+  // On a narrow (phone-width) screen there's rarely enough vertical room to
+  // also fit all 10 rows without shrinking cells to the point of being
+  // unreadable (Alan: "the grid much too small... maybe we only see the
+  // first few rows on the phone and as we select the screen can be scrolled
+  // upwards"). So below NARROW_LAYOUT_PX, size by width ALONE and let the
+  // grid run taller than the viewport — .game-wrap scrolls to it instead
+  // (see the CSS), and selectCell() scrolls the current selection into view
+  // as you climb. A wide-but-short window (e.g. a resized desktop browser)
+  // still gets the old "contain both axes" behavior, since that's a
+  // genuinely limited-height case, not a phone.
+  const narrow = rawW <= NARROW_LAYOUT_PX;
+  let size = narrow ? sizeByWidth : Math.min(sizeByWidth, sizeByHeight);
   if (!Number.isFinite(size) || size <= 0) size = 40;
   size = Math.max(14, Math.min(size, 140));
   gridEl.style.setProperty('--cell-size', size + 'px');
@@ -2009,6 +2018,12 @@ function selectCell(row, col, focusInput) {
   const cell = grid[row][col];
   cell.revealed = true; // selecting a boss-stage space is what reveals it
   const item = cell.item;
+  // inputMode has stayed permanently 'click' since the earlier touch-only
+  // change (see its declaration below), and the typed-answer bar/box has
+  // been removed entirely (Alan: "no entry and submit box") — so the
+  // choice panel is unconditionally the answer UI now. showChoices is kept
+  // as a variable (rather than just always true inline) only because
+  // cellForcesClick() still exists as a concept worth naming here.
   const showChoices = inputMode === 'click' || cellForcesClick(cell);
   document.getElementById('appRoot').classList.toggle('show-choices', showChoices);
   const barKanjiEl = document.getElementById('barKanji');
@@ -2018,14 +2033,27 @@ function selectCell(row, col, focusInput) {
   const category = answerCategory(cell.mode);
   document.getElementById('barHint').innerHTML =
     (isBossStage ? '⚔ One mistake ends the climb — ' : '') +
-    (showChoices ? 'Click the ' : 'Type the ') +
+    'Click the ' +
     `<span class="ans-badge ans-${category}">${esc(modeLabel(cell.mode))}</span>`;
-  const input = document.getElementById('answerInput');
-  input.value = '';
   document.getElementById('answerFeedback').textContent = '';
   document.getElementById('answerFeedback').className = 'answer-feedback';
   renderGrid();
-  if (focusInput && !showChoices) setTimeout(() => input.focus(), 20);
+  scrollSelectedIntoView(row, col);
+}
+
+// On the phone-width scrollable layout (see computeCellSize()/the
+// "@media (max-width: 820px)" .game-wrap rule), the grid can run taller
+// than the screen — this follows the current selection so climbing upward
+// scrolls the view up with it instead of leaving the player to hunt for
+// their own selected space. renderGrid() rebuilds every cell <div> fresh on
+// every call, so this must run AFTER that render, against the fresh node.
+// scrollIntoView is absent in the test harness's stub DOM (and on any
+// browser too old to have it) — both are just a silent no-op here.
+function scrollSelectedIntoView(row, col) {
+  const el = document.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
+  if (el && typeof el.scrollIntoView === 'function') {
+    el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+  }
 }
 
 // Called on a fresh grid (new climb / new stage) — picks a bottom-row cell
@@ -2106,15 +2134,11 @@ document.getElementById('grid').addEventListener('click', (e) => {
   selectCell(Number(cellEl.dataset.row), Number(cellEl.dataset.col), true);
 });
 
-// G/H/T/U/V/N drive the grid; they only fire while the answer input is NOT
-// focused, since those same letters are ordinary characters in a typed
-// answer (e.g. "night", "vehicle"). Enter (unfocused) hands focus to the
-// input so typing can start; the input's own handler below submits on Enter
-// and blurs back to navigation mode afterward.
+// G/H/T/U/V/N drive the grid. There's no typed-answer input to steal these
+// letters anymore (Alan: "no entry and submit box" — see selectCell()),
+// so this no longer needs to check any focused-element guard first.
 document.addEventListener('keydown', (e) => {
   if (phase !== 'playing' || gameOver) return;
-  const input = document.getElementById('answerInput');
-  if (document.activeElement === input) return;
   const key = e.key.toLowerCase();
   if (key === 'g')      { e.preventDefault(); moveSelection('left'); }
   else if (key === 'h') { e.preventDefault(); moveSelection('right'); }
@@ -2122,9 +2146,6 @@ document.addEventListener('keydown', (e) => {
   else if (key === 'u') { e.preventDefault(); moveDiagonal('up-right'); }
   else if (key === 'v') { e.preventDefault(); moveDiagonal('down-left'); }
   else if (key === 'n') { e.preventDefault(); moveDiagonal('down-right'); }
-  else if (e.key === 'Enter' && inputMode === 'type' && !(selected && cellForcesClick(grid[selected.row][selected.col]))) {
-    e.preventDefault(); input.focus();
-  }
 });
 
 // Returns whether the guess was correct — used directly by both the typed
@@ -2140,7 +2161,6 @@ function checkAnswer(raw) {
   const accepted = acceptedTokensFor(item, cell.mode) || [];
   const correct = accepted.includes(guess);
 
-  document.getElementById('answerInput').value = '';
   const fb = document.getElementById('answerFeedback');
   if (correct) {
     fb.textContent = '✓ Correct!';
@@ -2680,20 +2700,6 @@ function returnToSetup() {
 document.getElementById('btnStartGame').addEventListener('click', startGame);
 document.getElementById('btnNewGame').addEventListener('click', returnToSetup);
 document.getElementById('btnEndNewGame').addEventListener('click', returnToSetup);
-document.getElementById('btnAnswerSubmit').addEventListener('click', () => {
-  const input = document.getElementById('answerInput');
-  checkAnswer(input.value);
-  input.blur();
-});
-document.getElementById('answerInput').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') {
-    e.preventDefault();
-    checkAnswer(e.target.value);
-    e.target.blur(); // back to navigation mode — G/H/T/U/V/N work immediately again
-  }
-  if (e.key === 'Escape') { e.target.value = ''; e.target.blur(); }
-});
-
 let resizeTimer = null;
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
