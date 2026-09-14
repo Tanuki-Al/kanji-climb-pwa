@@ -233,16 +233,25 @@ input, select { font-family: inherit; }
 
 /* ── Game area ── */
 .play-area { flex: 1; min-height: 0; display: flex; overflow: hidden; }
-/* align-items:flex-start (not center) + overflow-y:auto: the grid can now
-   run taller than the viewport at any screen width (see computeCellSize() —
+/* .game-wrap itself no longer scrolls — it's just a non-scrolling
+   positioning frame, so the scroll-pad buttons (position:absolute inside
+   it) stay visually fixed in their corner no matter how far the grid is
+   scrolled (Alan: clicking a cell was "moving the active point on the
+   screen to just below the down arrow" — an absolutely positioned child of
+   a SCROLLING container scrolls right along with everything else inside
+   it, which is why the button and the grid content kept ending up in the
+   same relative spot after every render; a plain child of .game-wrap,
+   which itself never scrolls, does not have that problem). All the actual
+   scrolling now happens on .grid-scroll, the child that wraps #grid. */
+.game-wrap { position: relative; flex: 1; min-height: 0; display: flex; }
+/* align-items:flex-start (not center) + overflow:auto: the grid can now run
+   taller than the viewport at any screen width (see computeCellSize() —
    Alan wants cells "large and clear" even if not all 10 rows fit on
    screen), and centering a scrollable child clips its overflow out of
    reach, so the top rows (the peak) stay reachable by scrolling up instead
-   of being centered partly off-screen with no way to scroll to it (see
-   selectCell()'s scrollIntoView, which follows the current selection). */
-.game-wrap {
-  position: relative; /* anchors the scroll-pad buttons (see below) */
-  flex: 1; min-height: 0; display: flex; align-items: flex-start; justify-content: center;
+   of being centered partly off-screen with no way to scroll to it. */
+.grid-scroll {
+  flex: 1; min-height: 0; width: 100%; display: flex; align-items: flex-start; justify-content: center;
   padding: 16px; overflow: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
 }
 /* rowBoxWidths() (see the JS) keeps a row's own widened cells from
@@ -256,17 +265,19 @@ input, select { font-family: inherit; }
    real scrollbar/trackpad swipe reach it when needed, and does nothing
    otherwise. Thin, theme-colored scrollbar so it doesn't look like a
    generic browser chrome element dropped into a dark game screen. */
-.game-wrap::-webkit-scrollbar { width: 8px; height: 8px; }
-.game-wrap::-webkit-scrollbar-track { background: transparent; }
-.game-wrap::-webkit-scrollbar-thumb { background: rgba(201,169,110,.35); border-radius: 8px; }
-.game-wrap::-webkit-scrollbar-thumb:hover { background: rgba(201,169,110,.55); }
-.game-wrap { scrollbar-width: thin; scrollbar-color: rgba(201,169,110,.35) transparent; }
+.grid-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.grid-scroll::-webkit-scrollbar-track { background: transparent; }
+.grid-scroll::-webkit-scrollbar-thumb { background: rgba(201,169,110,.35); border-radius: 8px; }
+.grid-scroll::-webkit-scrollbar-thumb:hover { background: rgba(201,169,110,.55); }
+.grid-scroll { scrollbar-width: thin; scrollbar-color: rgba(201,169,110,.35) transparent; }
 /* Explicit up/down/left/right nudge buttons floating over the grid — Alan
    asked directly for "a way to scroll with arrow buttons" as a sure,
    discoverable way to reach the whole pyramid regardless of input device
    (mouse wheel only scrolls vertically without an awkward Shift-hold; not
    every trackpad/mouse gives an obvious horizontal gesture). Harmless to
-   press when already at a scroll limit (scrollGameWrap() just no-ops). */
+   press when already at a scroll limit (scrollGameWrap() just no-ops).
+   Positioned absolute against .game-wrap (see above), NOT .grid-scroll —
+   that's what keeps them from scrolling away with the grid. */
 .scroll-pad-btn {
   position: absolute;
   z-index: 6;
@@ -373,7 +384,7 @@ input, select { font-family: inherit; }
   /* Stacks the grid above the choices instead of side-by-side. Deliberately
      NOT also setting overflow:auto here (the base .play-area rule already
      has overflow:hidden) — .play-area itself must never become a second
-     scroll container layered around .game-wrap's own overflow-y:auto and
+     scroll container layered around .grid-scroll's own overflow:auto and
      .choices-panel's own overflow-y:auto below, or iOS Safari can lock a
      touch-scroll gesture onto the wrong ancestor and the page appears to
      "get stuck" and stop responding to scrolling (Alan). Each scrollable
@@ -690,7 +701,9 @@ input, select { font-family: inherit; }
 
   <div class="play-area">
     <div class="game-wrap">
-      <div id="grid"></div>
+      <div class="grid-scroll" id="gridScroll">
+        <div id="grid"></div>
+      </div>
       <div class="scroll-pad" id="scrollPad">
         <button type="button" class="scroll-pad-btn up" data-dir="up" title="Scroll up" aria-label="Scroll up">▲</button>
         <button type="button" class="scroll-pad-btn down" data-dir="down" title="Scroll down" aria-label="Scroll down">▼</button>
@@ -1877,7 +1890,7 @@ function computeCellSize() {
   const wrap = gridEl.parentElement;
   const peakWidth = Math.max(...ROW_LENGTHS, 1);
   const gap = 8;
-  const pad = 36; // roughly matches .game-wrap's own padding on each axis
+  const pad = 36; // roughly matches .grid-scroll's own padding on each axis
   const rawW = (wrap && typeof wrap.clientWidth === 'number' && wrap.clientWidth > 0) ? wrap.clientWidth : 600;
   const availW = rawW - pad;
   const sizeByWidth = Math.floor((availW - (peakWidth - 1) * gap) / peakWidth);
@@ -1885,8 +1898,9 @@ function computeCellSize() {
   // OK if the full 10 rows don't fit on the screen and we have to scroll up
   // a little. I'd rather the kanji / words are large and clear." So the
   // grid is free to run taller than the viewport at any width, and
-  // .game-wrap scrolls to it instead of squashing cells down to fit every
-  // row (see the CSS and the scroll-pad arrows/scrollGameWrap()).
+  // .grid-scroll (the actual scrolling element — see the CSS) scrolls to it
+  // instead of squashing cells down to fit every row (or use the scroll-pad
+  // arrows/scrollGameWrap()).
   //
   // WIDTH_FILL_RATIO: cells filling the full available width edge-to-edge
   // came out "a little too large" (Alan) once every row could size purely
@@ -1945,9 +1959,9 @@ function cellBoxWidthPx(cell, cellSize) {
 // computeCellSize() sizes every cell in the widest (peak) row to exactly
 // fill the available width, so that row has zero horizontal slack left —
 // but a wide box (see cellBoxWidthPx() above) can still land in ANY row,
-// including the peak one, and .game-wrap has no horizontal scroll (a
-// pyramid row is meant to always fit; Alan found wide cells pushed off the
-// left/right edge with no way to reach them: "I'm unable to move left and
+// including the peak one, and a pyramid row is meant to always fit on its
+// own rather than relying on the horizontal scroll (Alan found wide cells
+// pushed off the left/right edge with no way to reach them: "I'm unable to move left and
 // right"). This scales each row's wide boxes down just enough — using
 // natural width UP TO whatever slack that specific row actually has versus
 // the peak row — so the whole row always fits, falling back to the plain
@@ -1975,12 +1989,12 @@ function renderGrid() {
   const baseFontPx = Math.max(8, Math.floor(cellSize * 0.42));
   const el = document.getElementById('grid');
   const wrapEl = el.parentElement;
-  // Capture .game-wrap's scroll position BEFORE clearing #grid below.
-  // el.innerHTML='' briefly collapses #grid to nothing inside .game-wrap
-  // (a scrolling container), and the wrapEl.clientWidth read a few lines
-  // down — needed for rowBoxWidths() — forces the browser to lay out
+  // Capture .grid-scroll's scroll position BEFORE clearing #grid below.
+  // el.innerHTML='' briefly collapses #grid to nothing inside .grid-scroll
+  // (the actual scrolling element), and the wrapEl.clientWidth read a few
+  // lines down — needed for rowBoxWidths() — forces the browser to lay out
   // RIGHT THEN, while the grid is momentarily empty, which clamps
-  // .game-wrap's scroll position back to 0 on the spot. Restoring it once
+  // .grid-scroll's scroll position back to 0 on the spot. Restoring it once
   // the grid is fully rebuilt (see the end of this function) is what
   // actually stops the view jumping/recentring on every click (Alan:
   // "when I click a cell it still moves it up to the centre of the
@@ -2163,19 +2177,21 @@ function selectCell(row, col, focusInput) {
   // Alan: "I don't like the way when I click a cell it now recentres the
   // page and moves the page." Removed: the view now only moves when he
   // moves it himself (the scroll-pad arrows, a trackpad swipe, or the
-  // scrollbar — see .game-wrap/#scrollPad/scrollGameWrap()).
+  // scrollbar — see .grid-scroll/#scrollPad/scrollGameWrap()).
 }
 
 // The four floating scroll-pad buttons (see .scroll-pad-btn / #scrollPad) —
 // Alan: "Maybe a way to scroll with arrow buttons - up/down/left/right?"
 // after finding a plain mouse/trackpad gives no obvious way to reach
-// anything past the grid's left/right edge. Nudges .game-wrap by roughly
-// half its own visible size in the given direction; harmless to call at a
-// scroll limit (scrollBy just clamps there). #scrollPad lives outside
-// #grid, which renderGrid() rebuilds from scratch on every render, so the
-// buttons and this listener survive every climb/stage/selection change.
+// anything past the grid's left/right edge. Nudges .grid-scroll (the actual
+// scrolling element — .game-wrap around it is just a non-scrolling
+// positioning frame for these buttons, see the CSS) by roughly half its own
+// visible size in the given direction; harmless to call at a scroll limit
+// (scrollBy just clamps there). #scrollPad lives outside #grid, which
+// renderGrid() rebuilds from scratch on every render, so the buttons and
+// this listener survive every climb/stage/selection change.
 function scrollGameWrap(dir) {
-  const wrap = document.querySelector('.game-wrap');
+  const wrap = document.getElementById('gridScroll');
   if (!wrap || typeof wrap.scrollBy !== 'function') return;
   const stepY = Math.max(60, Math.round((wrap.clientHeight || 300) * 0.4));
   const stepX = Math.max(60, Math.round((wrap.clientWidth || 300) * 0.4));
