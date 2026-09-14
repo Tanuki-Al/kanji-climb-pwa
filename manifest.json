@@ -1,0 +1,16 @@
+{
+  "name": "天下の階段 — The Stairway of Japanese Legends",
+  "short_name": "Kanji Climb",
+  "description": "Word-climb game for Japanese study — answer kanji, readings and meanings correctly to clear a path to the top, stage by stage past figures from Japanese history and legend.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0d0d1a",
+  "theme_color": "#0d0d1a",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

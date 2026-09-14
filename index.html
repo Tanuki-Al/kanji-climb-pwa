@@ -1,0 +1,2714 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0d0d1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Kanji Climb">
+<meta name="description" content="Word-climb game for Japanese study — answer kanji, readings and meanings correctly to clear a path to the top, stage by stage past figures from Japanese history and legend.">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="apple-touch-icon" sizes="152x152" href="icons/apple-touch-icon-152.png">
+<link rel="apple-touch-icon" sizes="167x167" href="icons/apple-touch-icon-167.png">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16.png">
+<title>天下の階段 — The Stairway of Japanese Legends</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg:      #0d0d1a;
+  --bg2:     #141428;
+  --bg3:     #1c1c38;
+  --border:  rgba(255,255,255,0.08);
+  --gold:    #c9a96e;
+  --goldlit: #e8c987;
+  --green:   #4caf79;
+  --red:     #e05252;
+  --redlit:  #ff8a8a;
+  --blue:    #5b8cff;
+  --purple:  #a78bfa;
+  --text:    #e8e8e8;
+  --muted:   rgba(255,255,255,0.58);
+  --muted2:  rgba(255,255,255,0.36);
+  --radius:  14px;
+  --cell-size: 60px;
+  --cell-font: 1.4rem;
+  --cell-gap: 8px;
+}
+/* 100% / 100vh both lock to the viewport's LARGEST possible height on
+   mobile Safari/Chrome (address bar collapsed) — with overflow:hidden below,
+   that leaves the actual bottom of the page (the answer bar) clipped off
+   under the real, currently-shorter visible viewport whenever the address
+   bar is showing (Alan: "doesn't display well on the phone"). 100dvh tracks
+   the TRUE visible viewport as browser chrome shows/hides, so it's used
+   wherever supported, with the old 100%/100vh kept as the fallback for
+   anything that predates it. */
+html, body { height: 100%; overflow: hidden; }
+body {
+  font-family: 'Hiragino Kaku Gothic ProN','Noto Sans JP','Yu Gothic',sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  -webkit-tap-highlight-color: transparent; /* no gray flash on a tapped cell/button */
+}
+@supports (height: 100dvh) {
+  html, body { height: 100dvh; }
+  body { min-height: 100dvh; }
+}
+button { cursor: pointer; border: none; font-family: inherit; touch-action: manipulation; }
+input, select { font-family: inherit; }
+
+/* ── Loading ── */
+.loading-panel { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 20px; text-align: center; }
+.loader { width: 34px; height: 34px; border: 3px solid var(--border); border-top-color: var(--gold); border-radius: 50%; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+#loadMsg { color: var(--muted); font-size: .85rem; }
+
+/* ── Setup screen (choose level, locked once the climb starts) ── */
+.setup-panel { flex: 1; display: none; align-items: center; justify-content: center; padding: 20px; overflow: auto; }
+.setup-card {
+  background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 28px 26px; width: min(92vw, 420px);
+}
+.setup-title { font-size: 1.15rem; font-weight: 700; color: var(--gold); text-align: center; margin-bottom: 2px; }
+.setup-subtitle { font-size: .7rem; color: var(--muted); text-align: center; margin-bottom: 14px; letter-spacing: .02em; }
+.records-link {
+  display: block; margin: 0 auto 18px; background: transparent;
+  border: 1px solid var(--border); color: var(--goldlit);
+  padding: 6px 14px; border-radius: 8px; font-size: .76rem; font-weight: 600;
+}
+.records-link:hover { border-color: var(--gold); }
+.setup-group { margin-bottom: 18px; }
+.setup-label { display: block; font-size: .78rem; color: var(--muted); margin-bottom: 8px; }
+.setup-hint { font-size: .7rem; color: var(--muted2); margin-top: 6px; }
+.btn-start { width: 100%; background: var(--gold); color: #1a1408; border-radius: 10px; padding: 13px; font-size: .95rem; font-weight: 700; margin-top: 4px; }
+.btn-start:disabled { opacity: .55; cursor: default; }
+
+/* ── Records modal — every WK level's best score/time, at a glance from the
+   setup screen (Alan: "I want to be able to see previous best scores /
+   times... everything listed in a table"), kanji and compounds kept as
+   separate tabs since they're separate record books. ── */
+.records-modal {
+  position: fixed; inset: 0; background: rgba(0,0,0,.7);
+  display: none; align-items: center; justify-content: center; z-index: 930; padding: 20px;
+}
+.records-modal.open { display: flex; }
+.records-card {
+  background: var(--bg2); border: 1px solid var(--gold); border-radius: var(--radius);
+  padding: 22px 22px 18px; width: min(94vw, 640px); max-height: 84vh;
+  display: flex; flex-direction: column;
+}
+.records-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.records-filter-row { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.records-title { font-size: 1.05rem; font-weight: 700; color: var(--goldlit); }
+.records-close {
+  background: var(--bg3); color: var(--text); border: 1px solid var(--border);
+  border-radius: 8px; width: 30px; height: 30px; font-size: .85rem;
+}
+.records-table-wrap { overflow: auto; margin-top: 14px; border: 1px solid var(--border); border-radius: 10px; }
+.records-table { width: 100%; border-collapse: collapse; font-size: .78rem; }
+.records-table th, .records-table td { padding: 8px 12px; text-align: left; white-space: nowrap; }
+.records-table thead th {
+  position: sticky; top: 0; background: var(--bg3); color: var(--goldlit);
+  font-weight: 700; border-bottom: 1px solid var(--border);
+}
+.records-table tbody tr:nth-child(even) { background: rgba(255,255,255,0.03); }
+.records-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.records-empty { color: var(--muted2); font-style: italic; padding: 18px 12px !important; text-align: center; white-space: normal !important; }
+
+/* ── Header ── */
+.hdr {
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 18px;
+  /* env(...) is 0 on anything without a notch/dynamic-island, so this is a
+     no-op there — only matters on the phone PWA once viewport-fit=cover
+     lets these actually read nonzero. */
+  padding-top: calc(10px + env(safe-area-inset-top));
+  padding-left: calc(18px + env(safe-area-inset-left));
+  padding-right: calc(18px + env(safe-area-inset-right));
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  flex: none;
+}
+.hdr-title { font-size: .95rem; font-weight: 700; color: var(--gold); letter-spacing: .03em; white-space: nowrap; }
+.hdr-subtitle { font-size: .68rem; font-weight: 500; color: var(--muted); letter-spacing: 0; margin-left: 8px; }
+.hdr-stat { font-size: .78rem; color: var(--muted); white-space: nowrap; }
+.hdr-stat.stage { color: var(--goldlit); font-weight: 700; }
+.hdr-spacer { flex: 1; }
+.hdr-btn {
+  background: var(--bg3); color: var(--text); border: 1px solid var(--border);
+  border-radius: 10px; padding: 8px 14px; font-size: .8rem; font-weight: 600;
+}
+.hdr-btn:hover { border-color: var(--gold); }
+.hdr-btn.primary { background: var(--gold); color: #1a1408; border-color: var(--gold); }
+
+/* ── Settings bar (in-setup controls) ── */
+.settings-bar {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  font-size: .8rem;
+}
+.settings-group { display: flex; align-items: center; gap: 8px; }
+.settings-label { color: var(--muted); }
+.seg { display: flex; background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg button { background: transparent; color: var(--muted); padding: 6px 12px; font-size: .78rem; font-weight: 600; }
+.seg button.active { background: var(--gold); color: #1a1408; }
+.wk-input {
+  width: 52px; background: var(--bg3); border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text); padding: 5px 8px; font-size: .78rem; text-align: center;
+}
+/* ── Stage-clear toast ── */
+.stage-toast {
+  position: fixed; top: 18px; left: 50%; transform: translate(-50%, -140%);
+  background: var(--gold); color: #1a1408; font-weight: 700; font-size: .85rem;
+  padding: 10px 20px; border-radius: 999px; z-index: 950;
+  transition: transform .3s ease;
+  white-space: nowrap;
+}
+.stage-toast.show { transform: translate(-50%, 0); }
+
+/* ── Stage briefing — a title-card that sweeps in from off-screen, holds
+   center stage naming the historical figure + task + personal bests, then
+   sweeps back out (item 7; Alan: "something more cool... floating across
+   the screen before disappearing"). This is now the ONLY place the stage
+   name/character and best time/score are shown — the persistent header bar
+   was deliberately pared back to just cleared/wrong/timer (Alan's call). */
+.stage-brief {
+  position: fixed; top: 34%; left: 50%; transform: translate(-170%, -50%) scale(.94);
+  opacity: 0; pointer-events: none;
+  background: linear-gradient(135deg, var(--bg2), #241a08 130%);
+  border: 1px solid var(--gold); color: var(--text);
+  padding: 16px 28px; border-radius: 14px; z-index: 950;
+  transition: transform .55s cubic-bezier(.22,.85,.32,1), opacity .35s ease;
+  max-width: min(92vw, 460px); text-align: center;
+  box-shadow: 0 10px 40px rgba(0,0,0,.45), 0 0 30px rgba(212,175,55,.18);
+  cursor: pointer;
+}
+.stage-brief.show { transform: translate(-50%, -50%) scale(1); opacity: 1; pointer-events: auto; }
+.stage-brief.leaving {
+  transform: translate(65%, -50%) scale(.94); opacity: 0; pointer-events: none;
+  transition: transform .5s cubic-bezier(.4,0,.7,.4), opacity .45s ease;
+}
+.stage-brief-jp { font-weight: 700; color: var(--goldlit); font-size: 1.2rem; margin-bottom: 4px; letter-spacing: .04em; }
+.stage-brief-name { font-weight: 800; color: var(--text); font-size: 1.3rem; margin-bottom: 1px; text-shadow: 0 0 14px rgba(212,175,55,.4); }
+.stage-brief-role { font-weight: 600; color: var(--goldlit); font-size: .82rem; margin-bottom: 8px; font-style: italic; }
+.stage-brief-task { color: var(--muted); font-size: .78rem; margin-bottom: 6px; }
+.stage-brief-line { color: var(--muted2); font-size: .76rem; margin-top: 2px; }
+
+/* ── Keyboard-shortcut legend ── */
+.key-help {
+  position: fixed; left: 14px; top: 50%; transform: translateY(-50%);
+  background: rgba(20,20,40,.88);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 12px;
+  font-size: .68rem;
+  color: var(--muted);
+  z-index: 60;
+  backdrop-filter: blur(2px);
+}
+.key-help-title { font-size: .68rem; font-weight: 700; color: var(--gold); margin-bottom: 8px; letter-spacing: .04em; text-transform: uppercase; }
+.key-help-row { display: flex; align-items: center; gap: 5px; margin-bottom: 6px; white-space: nowrap; }
+.key-help-row:last-child { margin-bottom: 0; }
+.key-help-row span { margin-left: 2px; }
+.key-help-sep { height: 1px; background: var(--border); margin: 8px 0; }
+.key-help kbd {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px; padding: 0 4px;
+  background: var(--bg3); border: 1px solid var(--border); border-bottom-width: 2px;
+  border-radius: 4px; font-family: inherit; font-weight: 700; font-size: .68rem; color: var(--text);
+}
+@media (max-width: 820px) {
+  .key-help { display: none; } /* touch devices navigate by tapping instead */
+}
+
+/* ── Game area ── */
+.play-area { flex: 1; min-height: 0; display: flex; overflow: hidden; }
+.game-wrap { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 16px; overflow: hidden; }
+
+/* ── Click-to-select answer panel (input mode "click") ── */
+.choices-panel {
+  flex: none;
+  width: 230px;
+  border-left: 1px solid var(--border);
+  background: var(--bg2);
+  padding: 14px 12px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.choice-box {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: .8rem;
+  line-height: 1.3;
+  text-align: left;
+  color: var(--text);
+  transition: border-color .15s ease, background .15s ease, opacity .2s ease;
+}
+.choice-box:hover:not(:disabled) { border-color: var(--gold); background: rgba(201,169,110,.12); }
+.choice-box:disabled { opacity: .3; cursor: default; }
+.choice-box.flash-wrong { border-color: var(--red); background: rgba(224,82,82,.14); }
+/* An e2j/r2j box's text IS the kanji answer, not an English gloss/reading —
+   it needs to be noticeably bigger to read as comfortably as the other
+   boxes do at the base size. (Color comes from the shared .ans-kanji rule
+   below, same as every other answer-type color.) */
+.choice-box.ans-kanji { font-size: 1.35rem; font-weight: 700; text-align: center; line-height: 1.3; }
+
+/* ── Answer-type color language ──────────────────────────────────────────
+   One consistent color per requested-answer category (meaning / kanji /
+   reading / on'yomi / kun'yomi), reused everywhere that answer type shows
+   up: the choice boxes, the answer-bar hint badge, and a per-cell corner
+   tag on mixed-mode stages (see answerCategory()/renderAnswerChoices()/
+   selectCell()/renderGrid()). Alan: a mixed stage (e.g. compounds level 9,
+   or kanji mode's on'yomi+kun'yomi stages) could leave it unclear whether a
+   given space wanted the kanji or the reading — a correct-but-wrong-type
+   answer then read as a plain fail. This color+label system makes the
+   wanted type visible before you even commit to an answer. */
+.ans-meaning, .ans-kanji, .ans-reading, .ans-on, .ans-kun {
+  border-radius: 4px;
+}
+.ans-meaning { background: rgba(76,175,121,.16);  color: var(--green);   border: 1px solid rgba(76,175,121,.4); }
+.ans-kanji   { background: rgba(232,201,135,.16); color: var(--goldlit); border: 1px solid rgba(232,201,135,.4); }
+.ans-reading { background: rgba(91,140,255,.16);  color: var(--blue);    border: 1px solid rgba(91,140,255,.4); }
+.ans-on      { background: rgba(91,140,255,.16);  color: var(--blue);    border: 1px solid rgba(91,140,255,.4); }
+.ans-kun     { background: rgba(167,139,250,.16); color: var(--purple);  border: 1px solid rgba(167,139,250,.4); }
+/* Shape-only rules — color comes from the .ans-* class paired alongside. */
+.ans-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: .72rem;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+}
+/* The per-cell corner tag — only added in mixed-mode stages (see
+   renderGrid()), so single-mode stages stay visually clean. */
+.ans-tag {
+  position: absolute;
+  top: 2px;
+  right: 3px;
+  font-size: .5rem;
+  font-weight: 700;
+  line-height: 1.4;
+  padding: 0 3px;
+  pointer-events: none;
+}
+/* Which half of the answer UI shows is now decided per-selected-cell, not
+   fixed for the whole climb: overall inputMode picks click vs. type, but an
+   E→J cell always forces click (see cellForcesClick()/selectCell()) even on
+   a "type" climb. #appRoot.show-choices is toggled fresh on every selection. */
+.choices-panel { display: none; }
+#appRoot.show-choices .choices-panel { display: flex; }
+.answer-bar-row { display: none; }
+#appRoot:not(.show-choices) .answer-bar-row { display: flex; }
+@media (max-width: 820px) {
+  .play-area { flex-direction: column; overflow: auto; }
+  .choices-panel { width: 100%; max-height: 160px; border-left: none; border-top: 1px solid var(--border); flex-direction: row; flex-wrap: wrap; }
+}
+#grid {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--cell-gap);
+}
+.grid-row {
+  display: flex;
+  justify-content: center;
+  gap: var(--cell-gap);
+}
+.cell {
+  position: relative;
+  width: var(--cell-size);
+  height: var(--cell-size);
+  flex: none;
+  display: flex; align-items: center; justify-content: center;
+  overflow: visible;
+  background: var(--bg3);
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  font-size: var(--cell-font);
+  font-weight: 600;
+  color: var(--muted2);
+  transition: transform .15s ease, opacity .3s ease, background .2s ease, border-color .2s ease;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation; /* no 300ms tap delay / accidental double-tap zoom on a phone */
+  /* An e2j cell's face is an English meaning, not a single kanji — this lets
+     it wrap onto a couple of lines instead of spilling out of the box (the
+     actual font size for long text is shrunk per-cell in JS, see
+     fitTextFontPx()/renderGrid()). */
+  padding: 3px;
+  box-sizing: border-box;
+  text-align: center;
+  line-height: 1.08;
+  word-break: break-word;
+  hyphens: auto;
+}
+.cell.locked { opacity: .35; }
+.cell.available {
+  color: var(--text);
+  border-color: var(--gold);
+  background: var(--bg2);
+  cursor: pointer;
+  box-shadow: 0 0 0 0 rgba(201,169,110,.5);
+  animation: pulse 1.8s ease-in-out infinite;
+}
+.cell.available:hover { background: rgba(201,169,110,.12); transform: scale(1.04); }
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(201,169,110,.35); }
+  50%      { box-shadow: 0 0 0 6px rgba(201,169,110,0); }
+}
+/* The keyboard/tap-selected cell — a distinct blue highlight layered over
+   the ordinary gold "available" styling so it's clear which space is
+   currently active for typed answers. */
+.cell.available.selected {
+  border-color: var(--blue);
+  background: rgba(91,140,255,.16);
+  box-shadow: 0 0 0 3px rgba(91,140,255,.4);
+  animation: pulse-blue 1.4s ease-in-out infinite;
+}
+@keyframes pulse-blue {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(91,140,255,.4); }
+  50%      { box-shadow: 0 0 0 6px rgba(91,140,255,.12); }
+}
+.cell.cleared {
+  background: transparent;
+  border-color: rgba(76,175,121,.25);
+  color: transparent;
+  cursor: default;
+  animation: none;
+}
+.cell.cleared::after {
+  content: '✓';
+  position: absolute;
+  color: rgba(76,175,121,.45);
+  font-size: 1rem;
+}
+.cell.wrong {
+  background: rgba(224,82,82,.14);
+  border-color: var(--red);
+  color: var(--redlit);
+  cursor: default;
+  animation: none;
+}
+.cell.wrong .wrong-answer {
+  position: absolute;
+  bottom: 3px;
+  left: 0; right: 0;
+  font-size: .55rem;
+  font-weight: 500;
+  color: rgba(255,138,138,.85);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 4px;
+}
+/* On an e2j cell the "correction" IS the kanji (the actual answer) rather
+   than a short English/reading gloss — it needs real size to be legible,
+   not the thin caption treatment above. */
+.cell.wrong .wrong-answer.kanji {
+  font-size: .95rem;
+  font-weight: 700;
+  bottom: 2px;
+  color: var(--redlit);
+}
+.cell.hidden-item { color: rgba(255,255,255,.28); font-weight: 400; }
+.cell.blocked {
+  background: repeating-linear-gradient(45deg, rgba(255,255,255,.03), rgba(255,255,255,.03) 6px, transparent 6px, transparent 12px);
+  border-color: rgba(255,255,255,.05);
+  color: rgba(255,255,255,.16);
+  cursor: default;
+  animation: none;
+}
+.cell.start-row { border-bottom-width: 3px; border-bottom-color: var(--gold); }
+.cell.top-row.cleared { border-color: var(--goldlit); }
+
+/* Explosion: bigger punch — scale/rotate/brighten — plus a gold particle burst */
+@keyframes explode {
+  0%   { transform: scale(1)    rotate(0deg);  opacity: 1; filter: brightness(1); }
+  30%  { transform: scale(1.35) rotate(-5deg); opacity: 1; filter: brightness(2.4); }
+  100% { transform: scale(0.1)  rotate(10deg); opacity: 0; filter: brightness(3); }
+}
+/* !important is deliberate: .exploding must always win the animation
+   property over any other state class still lingering on the element
+   (e.g. .selected, .available) regardless of how many classes those carry —
+   a specificity fight here previously stalled the explosion silently. */
+.cell.exploding { animation: explode .45s cubic-bezier(.36,.07,.19,.97) forwards !important; z-index: 5; }
+.particle {
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 7px; height: 7px;
+  margin: -3.5px 0 0 -3.5px;
+  background: var(--goldlit);
+  border-radius: 50%;
+  box-shadow: 0 0 6px 1px rgba(232,201,135,.8);
+  pointer-events: none;
+  animation: particle-burst .55s ease-out forwards;
+  z-index: 6;
+}
+@keyframes particle-burst {
+  0%   { transform: translate(0,0) scale(1);   opacity: 1; }
+  100% { transform: translate(var(--tx), var(--ty)) scale(0.15); opacity: 0; }
+}
+
+/* ── Answer bar — persistent, docked at the bottom of the grid. Replaces the
+   old click-to-open popover: the current selection is chosen with the
+   keyboard (arrow keys) or a tap, and the input here is always ready. ── */
+.answer-bar {
+  flex: none;
+  background: var(--bg2);
+  border-top: 1px solid var(--border);
+  padding: 10px 18px;
+  /* Keeps the always-visible answer input clear of a phone's home-indicator
+     gesture bar, which otherwise sits right on top of it. */
+  padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  padding-left: calc(18px + env(safe-area-inset-left));
+  padding-right: calc(18px + env(safe-area-inset-right));
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.answer-bar-kanji { font-size: 1.9rem; font-weight: 700; color: var(--goldlit); min-width: 50px; max-width: 45%; text-align: center; line-height: 1.15; word-break: break-word; }
+.answer-bar-fields { flex: 1; min-width: 200px; }
+.answer-bar-hint { font-size: .72rem; color: var(--muted); margin-bottom: 5px; }
+.answer-bar-row { display: flex; gap: 10px; }
+.answer-bar-input {
+  flex: 1;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  font-size: 1rem;
+  padding: 10px 12px;
+  outline: none;
+}
+.answer-bar-input:focus { border-color: var(--blue); }
+.answer-bar-row button { padding: 10px 18px; border-radius: 10px; font-size: .82rem; font-weight: 600; }
+.answer-feedback { font-size: .76rem; margin-top: 5px; min-height: 15px; }
+.answer-feedback.correct { color: var(--green); }
+.answer-feedback.incorrect { color: var(--redlit); }
+
+/* ── End banner ── */
+.end-banner {
+  position: fixed; inset: 0; background: rgba(0,0,0,.7);
+  display: none; align-items: center; justify-content: center; z-index: 900; padding: 20px;
+}
+.end-banner.open { display: flex; }
+.end-card {
+  background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 32px 28px; text-align: center; max-width: 340px;
+}
+.end-emoji { font-size: 2.6rem; margin-bottom: 8px; }
+.end-title { font-size: 1.3rem; font-weight: 700; margin-bottom: 6px; }
+.end-title.win { color: var(--goldlit); }
+.end-title.lose { color: var(--redlit); }
+.end-sub { font-size: .82rem; color: var(--muted); margin-bottom: 14px; }
+.end-stats { text-align: left; margin-bottom: 18px; }
+.end-stats-row { font-size: .76rem; color: var(--muted); margin-bottom: 5px; }
+.end-stats-best { color: var(--muted2); }
+.record-badge { color: var(--goldlit); font-weight: 700; }
+.end-stats-note { display: block; margin-top: 6px; font-size: .68rem; color: var(--muted2); font-style: italic; }
+
+/* ── Stage gate — a deliberate pause between stages/the boss, instead of
+   auto-starting the next one on a fixed timer, so the player can actually
+   catch their breath and read what's coming. ── */
+.stage-gate {
+  position: fixed; inset: 0; background: rgba(0,0,0,.7);
+  display: none; align-items: center; justify-content: center; z-index: 920; padding: 20px;
+}
+.stage-gate.open { display: flex; }
+.stage-gate-card {
+  background: var(--bg2); border: 1px solid var(--gold); border-radius: var(--radius);
+  padding: 30px 28px; text-align: center; max-width: 340px;
+}
+.stage-gate-jp { font-size: 1.5rem; font-weight: 700; color: var(--goldlit); margin-bottom: 4px; }
+.stage-gate-title { font-size: 1.05rem; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+.stage-gate-task { font-size: .82rem; color: var(--muted); margin-bottom: 14px; }
+.stage-gate-best { font-size: .78rem; color: var(--muted2); margin-bottom: 20px; line-height: 1.5; }
+
+@media (max-width: 560px) {
+  .hdr { padding: 8px 12px; }
+  .answer-bar { padding: 8px 12px; }
+  .setup-card { padding: 22px 18px; }
+}
+</style>
+</head>
+<body>
+
+<div class="loading-panel" id="loadingPanel">
+  <div class="loader"></div>
+  <div id="loadMsg">Loading kanji…</div>
+</div>
+
+<div class="setup-panel" id="setupPanel">
+  <div class="setup-card">
+    <div class="setup-title">⛰️ 天下の階段</div>
+    <div class="setup-subtitle">The Stairway of Japanese Legends — New Climb</div>
+    <button class="records-link" id="btnShowRecords" type="button">🏆 View Records</button>
+
+    <div class="setup-group">
+      <span class="setup-label">Climb</span>
+      <div class="seg" id="setupModeTabs">
+        <button data-mode="kanji" class="active">漢字 Kanji</button>
+        <button data-mode="compounds">熟語 Compounds</button>
+      </div>
+    </div>
+
+    <div class="setup-group" id="categoryGroup" style="display:none;">
+      <span class="setup-label">Category</span>
+      <select class="wk-input" id="categoryFilter" style="width:100%; text-align:left;">
+        <option value="all">All categories</option>
+      </select>
+      <div class="setup-hint">Picking one specific category (rather than "All") makes this climb untracked — no best score/time saved for it — since a category isn't a WK level the record book can file it under.</div>
+    </div>
+
+    <div class="setup-group">
+      <span class="setup-label">WK level</span>
+      <div class="seg" id="setupSegLevel">
+        <button data-levelmode="specific" class="active">Level</button>
+        <button data-levelmode="range">Range</button>
+        <button data-levelmode="none">No WK Level</button>
+        <button data-levelmode="master">Master (All)</button>
+      </div>
+      <div class="settings-group" id="wkSingleGroup" style="margin-top:8px;">
+        <input type="number" class="wk-input" id="wkLevel" min="1" max="60" placeholder="e.g. 12" style="width:64px;">
+      </div>
+      <div class="settings-group" id="wkRangeGroup" style="margin-top:8px; display:none;">
+        <input type="number" class="wk-input" id="wkFrom" min="1" max="60" placeholder="min">
+        <span class="settings-label">–</span>
+        <input type="number" class="wk-input" id="wkTo" min="1" max="60" placeholder="max">
+      </div>
+      <div class="setup-hint" id="wkModeHint"></div>
+    </div>
+
+    <div class="setup-hint" id="compoundsLoadHint" style="display:none; margin-bottom:14px;"></div>
+
+    <div class="setup-hint" id="setupExplainer" style="margin-bottom:14px;">
+      10 stages per climb. Each level's shape is randomized fresh — 2 to 5
+      starting spaces at the bottom, widening or narrowing by one space each
+      row up, always 10 rows tall. Each stage after the first also blocks off
+      a few more random spaces (✕) — always leaving at least one route to the
+      top. Once the climb starts, move between open spaces with G/H/T/U/V/N
+      (a key legend shows on the left) or by tapping/clicking them directly,
+      then tap/click your answer from the panel on the right. Beat stage 10
+      and the board resets clean for one final ⚔ boss battle — every space
+      but the bottom row is hidden until you select it, and a single wrong
+      answer ends the run.
+    </div>
+
+    <button class="btn-start" id="btnStartGame">▶ Start Climb</button>
+  </div>
+</div>
+
+<div id="appRoot" style="display:none; flex-direction:column; flex:1; min-height:0;">
+  <div class="key-help" id="keyHelp">
+    <div class="key-help-title">Move</div>
+    <div class="key-help-row"><kbd>T</kbd><kbd>U</kbd><span>Up-left / Up-right</span></div>
+    <div class="key-help-row"><kbd>G</kbd><kbd>H</kbd><span>Left / Right</span></div>
+    <div class="key-help-row"><kbd>V</kbd><kbd>N</kbd><span>Down-left / Down-right</span></div>
+    <div class="key-help-sep"></div>
+    <div class="key-help-row"><kbd>⏎</kbd><span>Focus the answer box</span></div>
+  </div>
+  <header class="hdr">
+    <div class="hdr-title">⛰️ 天下の階段<span class="hdr-subtitle">The Stairway of Japanese Legends</span></div>
+    <div class="hdr-stat stage" id="statStage">Stage 1 / 10</div>
+    <div class="hdr-stat" id="statCleared">0 cleared</div>
+    <div class="hdr-stat" id="statWrong">0 wrong</div>
+    <div class="hdr-stat" id="statTimer">⏱ 0:00</div>
+    <div class="hdr-spacer"></div>
+    <button class="hdr-btn" id="btnPeek" style="display:none;" title="Reveal a random hidden space without answering it — costs 20 points">👁 Peek (-20)</button>
+    <button class="hdr-btn primary" id="btnNewGame">↻ New Game</button>
+  </header>
+
+  <div class="play-area">
+    <div class="game-wrap">
+      <div id="grid"></div>
+    </div>
+    <div class="choices-panel" id="choicesPanel"></div>
+  </div>
+
+  <div class="answer-bar" id="answerBar">
+    <div class="answer-bar-kanji" id="barKanji">—</div>
+    <div class="answer-bar-fields">
+      <div class="answer-bar-hint" id="barHint">Use G/H/T/U/V/N to choose a space</div>
+      <div class="answer-bar-row">
+        <input class="answer-bar-input" id="answerInput" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Type your answer…">
+        <button class="hdr-btn primary" id="btnAnswerSubmit">Submit</button>
+      </div>
+      <div class="answer-feedback" id="answerFeedback"></div>
+    </div>
+  </div>
+</div>
+
+<div class="stage-toast" id="stageToast"></div>
+<div class="stage-brief" id="stageBrief" title="Click to dismiss"></div>
+
+<div class="stage-gate" id="stageGate">
+  <div class="stage-gate-card">
+    <div class="stage-gate-jp" id="gateJP"></div>
+    <div class="stage-gate-title" id="gateTitle"></div>
+    <div class="stage-gate-task" id="gateTask"></div>
+    <div class="stage-gate-best" id="gateBest"></div>
+    <button class="btn-start" id="btnGateStart">▶ Start</button>
+  </div>
+</div>
+
+<div class="end-banner" id="endBanner">
+  <div class="end-card">
+    <div class="end-emoji" id="endEmoji">🏔️</div>
+    <div class="end-title" id="endTitle">You reached the top!</div>
+    <div class="end-sub" id="endSub"></div>
+    <div class="end-stats" id="endStats"></div>
+    <button class="hdr-btn primary" id="btnEndNewGame" style="width:100%">↻ New Game</button>
+  </div>
+</div>
+
+<div class="records-modal" id="recordsModal">
+  <div class="records-card">
+    <div class="records-header">
+      <div class="records-title">🏆 Climb Records</div>
+      <button class="records-close" id="btnCloseRecords" type="button">✕</button>
+    </div>
+    <div class="seg" id="recordsModeTabs">
+      <button data-rmode="kanji" class="active">漢字 Kanji</button>
+      <button data-rmode="compounds">熟語 Compounds</button>
+    </div>
+    <div class="records-filter-row">
+      <span class="setup-label" style="margin-bottom:0;">Level</span>
+      <select class="wk-input" id="recordsLevelFilter" style="width:auto; text-align:left;">
+        <option value="all">All levels</option>
+      </select>
+    </div>
+    <div class="records-table-wrap">
+      <table class="records-table">
+        <thead id="recordsTableHead">
+          <tr>
+            <th>Level</th>
+            <th>Best Score</th>
+            <th>Best Full-Climb Time</th>
+            <th>Boss (kept hidden)</th>
+          </tr>
+        </thead>
+        <tbody id="recordsTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+/*══════════════════════════════════════════════
+  DATA — same kanji sheet + JSONP pattern as kanji_app.html.
+  Distinct global handler name (handleClimbKanjiData) so this file can
+  one day live alongside kanji_app.html (e.g. in an iframe hub) without
+  colliding with its window.handleKanjiData.
+══════════════════════════════════════════════*/
+const SHEET_ID  = '1U3xf7DzwF7uSZF7z9ZJK9G8n-XblEqNoX5J7hHnc6Ow';
+const SHEET_GID = '1687082884';
+const CLIMB_DATA_CACHE_KEY = 'kanji-climb-data-cache';
+
+let ALL = []; // [{kanji, meaning, on, kun, wk}]
+let phase = 'loading'; // 'loading' | 'setup' | 'playing'
+
+function parseRow(r) {
+  const c = r.c || [];
+  const v = i => (c[i] && c[i].v != null) ? String(c[i].v).trim() : '';
+  // Some kanji sit outside WaniKani's 60 levels entirely and the sheet may
+  // leave the WK column blank OR carry non-numeric text for them — either
+  // way that's "no WK level", not a real value, so NaN collapses to null
+  // right here rather than leaking into every k.wk != null check downstream.
+  const n = i => {
+    if (!c[i] || c[i].v == null) return null;
+    const raw = String(c[i].v).trim();
+    if (raw === '') return null; // Number('') is 0, not NaN — guard it explicitly
+    const num = Number(raw);
+    return Number.isFinite(num) ? num : null;
+  };
+  return {
+    kanji: v(0), meaning: v(1), wk: n(4), on: v(5), kun: v(6)
+  };
+}
+
+// Item shape the GAME actually plays with — deliberately generic so a future
+// "compounds" mode (and, later, category-based selection once compounds add
+// real theme tags to the sheet) can plug in without touching any of the
+// grid/game logic below. `accepted.meaning`/`accepted.on`/`accepted.kun` are
+// the lenient sets of correct answers (lowercased, trimmed) for each mode.
+function toClimbItem(row) {
+  const meanings = row.meaning.split(/[,;]/).map(s => s.trim().toLowerCase()).filter(Boolean);
+  const onReadings  = row.on.split(/[・\/]/).map(s => s.trim().toLowerCase()).filter(Boolean);
+  const kunReadings = row.kun.split(/[・\/]/).map(s => s.trim().toLowerCase()).filter(Boolean);
+  return {
+    type: 'kanji',
+    display: row.kanji,
+    wk: row.wk,
+    accepted: { meaning: meanings, on: onReadings, kun: kunReadings },
+    // shown on a wrong cell, for learning value
+    primaryMeaning: row.meaning,
+    primaryOn: row.on,
+    primaryKun: row.kun
+  };
+}
+
+// The base per-cell answer modes (a "Mixed" stage just means a board where
+// different cells independently carry different ones of these — see
+// KANJI_STAGE_MODE_POOLS/COMPOUND_STAGE_MODE_POOLS below). Kanji-mode items
+// only ever roll the first 4; Compounds-mode items only ever roll 'j2e',
+// 'e2j', 'j2r' and 'r2j' — the two families never mix on the same board.
+//   'j2e' — kanji shown, English meaning is the answer (the original mode)
+//   'e2j' — English meaning shown, the KANJI ITSELF is the answer (always
+//           click-only, even in "Type & Enter" mode — see cellForcesClick())
+//   'on'  — kanji-mode only: kanji shown, on'yomi is the answer
+//   'kun' — kanji-mode only: kanji shown, kun'yomi is the answer
+//   'j2r' — Compounds-mode only: kanji shown, its READING is the answer
+//   'r2j' — Compounds-mode only: reading shown, the KANJI ITSELF is the
+//           answer (also always click-only, same reasoning as e2j)
+
+// Modes whose correct answer IS the kanji itself, rather than a
+// typed/reading answer — these force click-to-select input and get the
+// "kanji" treatment (bigger font, wider box, kanji-styled choice box).
+function modeAnswerIsKanji(mode) {
+  return mode === 'e2j' || mode === 'r2j';
+}
+
+// What a cell showing this mode should display once revealed (the "face" of
+// the card), vs. leaving it hidden as '？' — see renderGrid().
+function cellFaceText(cell) {
+  if (cell.mode === 'e2j') return cell.item.primaryMeaning;
+  if (cell.mode === 'r2j') return cell.item.primaryReading;
+  return cell.item.display;
+}
+
+// What text reveals the CORRECT answer on a 'wrong' cell, for learning value.
+function primaryFor(item, mode) {
+  if (mode === 'on') return item.primaryOn || '(no on-yomi)';
+  if (mode === 'kun') return item.primaryKun || '(no kun-yomi)';
+  if (mode === 'j2r') return item.primaryReading || '(no reading)';
+  if (modeAnswerIsKanji(mode)) return item.display; // e2j/r2j — the kanji itself
+  return item.primaryMeaning; // 'j2e'
+}
+
+function modeLabel(mode) {
+  if (mode === 'on') return "on'yomi";
+  if (mode === 'kun') return "kun'yomi";
+  if (mode === 'j2r') return 'reading';
+  if (modeAnswerIsKanji(mode)) return 'kanji';
+  return 'meaning'; // 'j2e'
+}
+
+// Which color-coded "family" a mode's expected answer belongs to — see the
+// "Answer-type color language" CSS block for what each category looks like,
+// and answerTagShort() for the per-cell corner label. modeLabel() above is
+// the human-readable word; this is the machine-readable class-name key for
+// the same grouping (on'yomi and reading share a color since they never
+// both appear in the same stage — kanji mode and compounds mode are
+// mutually exclusive — but on'yomi and kun'yomi get different colors since
+// stage 9/10/boss in kanji mode CAN roll both at once).
+function answerCategory(mode) {
+  if (mode === 'on') return 'on';
+  if (mode === 'kun') return 'kun';
+  if (mode === 'j2r') return 'reading';
+  if (modeAnswerIsKanji(mode)) return 'kanji';
+  return 'meaning'; // 'j2e'
+}
+
+// Short label for the per-cell corner tag (renderGrid(), mixed stages only).
+function answerTagShort(category) {
+  if (category === 'on') return '音';
+  if (category === 'kun') return '訓';
+  if (category === 'reading') return '読';
+  if (category === 'kanji') return '字';
+  return '訳'; // meaning
+}
+
+// The lenient set of accepted answer strings for a cell's mode — the single
+// place that couples "which mode" to "which accepted[...] bucket (or, for
+// e2j/r2j, the kanji itself) counts as correct." checkAnswer() and
+// buildAnswerChoices() both go through this, so click-mode and type-mode
+// always score identically off the exact same tokens.
+function acceptedTokensFor(item, mode) {
+  if (mode === 'on') return item.accepted.on;
+  if (mode === 'kun') return item.accepted.kun;
+  if (mode === 'j2r') return item.accepted.reading;
+  if (modeAnswerIsKanji(mode)) return [item.display.toLowerCase()];
+  return item.accepted.meaning; // 'j2e'
+}
+
+// Does this item actually support being asked in this mode? on'yomi/kun'yomi
+// (kanji mode) and reading (compounds mode, 'j2r'/'r2j') need the item to
+// actually HAVE that reading; j2e/e2j only need a meaning and the kanji
+// itself, both guaranteed by the data filter already (applyClimbRows/
+// applyCompoundRows keep only rows with kanji+meaning) — see
+// assignCellModesAndItems() in newGrid(), which is what this guards.
+function itemSupportsMode(item, mode) {
+  if (mode === 'on') return !!(item.accepted.on && item.accepted.on.length);
+  if (mode === 'kun') return !!(item.accepted.kun && item.accepted.kun.length);
+  if (mode === 'j2r' || mode === 'r2j') return !!(item.accepted.reading && item.accepted.reading.length);
+  return true;
+}
+
+// Data arriving (from cache and/or the live sheet) never yanks the rug from
+// under a game already in progress — it only drives the loading->setup
+// transition the first time, and quietly refreshes ALL in the background
+// otherwise so the next "New Game" has fresh data.
+function applyClimbRows(rawRows) {
+  ALL = rawRows.map(parseRow).filter(k => k.kanji && k.meaning);
+  if (phase === 'loading') {
+    document.getElementById('loadingPanel').style.display = 'none';
+    document.getElementById('setupPanel').style.display = 'flex';
+    phase = 'setup';
+  }
+}
+
+// OFFLINE CACHE — same pattern as the other apps in this family: render
+// instantly from the last successful pull, then let the live JSONP request
+// (kicked off right after) quietly refresh it when it lands.
+function tryClimbCache() {
+  try {
+    const raw = localStorage.getItem(CLIMB_DATA_CACHE_KEY);
+    if (!raw) return false;
+    const rows = JSON.parse(raw);
+    if (!rows || !rows.length) return false;
+    applyClimbRows(rows);
+    return true;
+  } catch (e) { return false; }
+}
+
+window.handleClimbKanjiData = function (resp) {
+  if (!resp || resp.status === 'error' || !resp.table || !resp.table.rows) {
+    if (!ALL.length) showLoadError('Could not load the kanji sheet — check your connection.');
+    return;
+  }
+  applyClimbRows(resp.table.rows);
+  try { localStorage.setItem(CLIMB_DATA_CACHE_KEY, JSON.stringify(resp.table.rows)); } catch (e) {}
+};
+
+function loadData() {
+  const usedCache = tryClimbCache();
+  const sc = document.createElement('script');
+  sc.src = 'https://docs.google.com/spreadsheets/d/' + SHEET_ID +
+    '/gviz/tq?tqx=out:json;responseHandler:handleClimbKanjiData&gid=' + SHEET_GID +
+    '&tq=select%20*%20limit%203000';
+  sc.onerror = () => { if (!usedCache && !ALL.length) showLoadError('Could not reach Google Sheets.'); };
+  document.head.appendChild(sc);
+  setTimeout(() => { if (!usedCache && !ALL.length) showLoadError('Timed out. Check your connection.'); }, 10000);
+}
+
+function showLoadError(msg) {
+  document.getElementById('loadMsg').innerHTML = '<span style="color:#e05252">⚠ ' + msg + '</span>';
+}
+
+/*══════════════════════════════════════════════
+  COMPOUNDS MODE — DATA
+  Item 8: a second climb mode built on the "Monkey No Aware No Japanese
+  Vocab" sheet (compound words + phrases, not single kanji) rather than the
+  kanji sheet above. Same gviz/JSONP pattern, own cache key and own global
+  handler name, and — since this sheet is much bigger (9000+ rows) and most
+  climbs will only ever touch one mode — loaded LAZILY, only once the player
+  actually switches to the Compounds tab on the setup screen (see
+  ensureCompoundsDataLoading() / the tab-switch handler below), not up front
+  alongside the kanji sheet.
+══════════════════════════════════════════════*/
+const COMPOUNDS_SHEET_ID = '1pFN9GkciYSqEQoPT4WboOcFkQJGGNH4twjnQGVyEuaw';
+const COMPOUNDS_DATA_CACHE_KEY = 'kanji-climb-compounds-data-cache';
+
+let COMPOUNDS_ALL = []; // [{kanji, reading, meaning, wk, category}]
+let compoundsLoadState = 'idle'; // 'idle' | 'loading' | 'ready' | 'error'
+
+// Column layout (confirmed against the live sheet): A Number, B Word
+// (kanji／compound, e.g. "犬（いぬ）" — kanji then its reading in full-width
+// parens), C Meaning (short comma/semicolon-separated gloss(es) followed by
+// a longer explanatory parenthetical, e.g. "a ranch, a pasture, a farm
+// (land used for raising and grazing livestock...)"), F WK Level, P
+// Category (44 distinct values on the sheet — read off the data itself
+// rather than hardcoded, see populateCategoryFilter()).
+function parseCompoundRow(r) {
+  const c = r.c || [];
+  const v = i => (c[i] && c[i].v != null) ? String(c[i].v).trim() : '';
+  const n = i => {
+    if (!c[i] || c[i].v == null) return null;
+    const raw = String(c[i].v).trim();
+    if (raw === '') return null;
+    const num = Number(raw);
+    return Number.isFinite(num) ? num : null;
+  };
+  const wordRaw = v(1); // B = Word
+  let kanji = wordRaw, reading = '';
+  let openIdx = wordRaw.indexOf('（'); // full-width — what the sheet actually uses
+  let closeCh = '）';
+  if (openIdx === -1) { openIdx = wordRaw.indexOf('('); closeCh = ')'; }
+  if (openIdx !== -1) {
+    kanji = wordRaw.slice(0, openIdx).trim();
+    reading = wordRaw.slice(openIdx + 1).split(closeCh)[0].trim();
+  }
+  return { kanji, reading, meaning: v(2), wk: n(5), category: v(15) }; // C=2, F=5, P=15
+}
+
+// The Meaning column packs a short answerable gloss (or a few, comma/
+// semicolon-separated) followed by a longer explanatory aside — in a
+// trailing " (...)" parenthetical on most rows, occasionally introduced by
+// an em dash instead (" — ..."). Whichever comes first in the string wins;
+// what's left before it is the actual short-gloss prefix we want.
+function compoundMeaningPrefix(raw) {
+  let s = raw || '';
+  const cuts = [s.indexOf(' ('), s.indexOf('（'), s.indexOf(' — ')].filter(i => i !== -1);
+  if (cuts.length) s = s.slice(0, Math.min(...cuts));
+  return s.trim();
+}
+
+// Same "generic item" shape as toClimbItem() above — display/accepted/
+// primary* — so none of the shared mode-dispatch helpers or grid/game logic
+// need to know or care whether an item came from the kanji sheet or here.
+// Compounds don't distinguish on'yomi/kun'yomi (a compound has ONE reading),
+// so accepted.reading/primaryReading stand in for accepted.on/accepted.kun
+// — see itemSupportsMode()/acceptedTokensFor()/primaryFor() below for the
+// 'j2r' (kanji → reading) and 'r2j' (reading → kanji) modes that use them.
+function toCompoundItem(row) {
+  const prefix = compoundMeaningPrefix(row.meaning);
+  const glosses = prefix.split(/[,;]/).map(s => s.trim()).filter(Boolean);
+  const meanings = glosses.length ? glosses.map(s => s.toLowerCase()) : [row.meaning.toLowerCase()];
+  const readingLower = row.reading.toLowerCase();
+  return {
+    type: 'compound',
+    display: row.kanji,
+    wk: row.wk,
+    category: row.category,
+    accepted: { meaning: meanings, reading: readingLower ? [readingLower] : [] },
+    primaryMeaning: glosses.length ? glosses.join(', ') : row.meaning,
+    primaryReading: row.reading || '(no reading)'
+  };
+}
+
+function applyCompoundRows(rawRows) {
+  COMPOUNDS_ALL = rawRows.map(parseCompoundRow).filter(k => k.kanji && k.meaning);
+  compoundsLoadState = 'ready';
+  populateCategoryFilter();
+  updateCompoundsSetupUI();
+}
+
+function tryCompoundsCache() {
+  try {
+    const raw = localStorage.getItem(COMPOUNDS_DATA_CACHE_KEY);
+    if (!raw) return false;
+    const rows = JSON.parse(raw);
+    if (!rows || !rows.length) return false;
+    applyCompoundRows(rows);
+    return true;
+  } catch (e) { return false; }
+}
+
+window.handleClimbCompoundsData = function (resp) {
+  if (!resp || resp.status === 'error' || !resp.table || !resp.table.rows) {
+    if (!COMPOUNDS_ALL.length) { compoundsLoadState = 'error'; updateCompoundsSetupUI(); }
+    return;
+  }
+  applyCompoundRows(resp.table.rows);
+  try { localStorage.setItem(COMPOUNDS_DATA_CACHE_KEY, JSON.stringify(resp.table.rows)); } catch (e) {}
+};
+
+// Kicked off once, the first time the player switches to the Compounds tab
+// (see the tab-switch handler near the setup screen) — never at page load.
+function ensureCompoundsDataLoading() {
+  if (compoundsLoadState !== 'idle') return;
+  compoundsLoadState = 'loading';
+  const usedCache = tryCompoundsCache();
+  const sc = document.createElement('script');
+  sc.src = 'https://docs.google.com/spreadsheets/d/' + COMPOUNDS_SHEET_ID +
+    '/gviz/tq?tqx=out:json;responseHandler:handleClimbCompoundsData&tq=select%20*%20limit%2020000';
+  sc.onerror = () => { if (!usedCache && !COMPOUNDS_ALL.length) { compoundsLoadState = 'error'; updateCompoundsSetupUI(); } };
+  document.head.appendChild(sc);
+  setTimeout(() => {
+    if (!usedCache && !COMPOUNDS_ALL.length && compoundsLoadState === 'loading') {
+      compoundsLoadState = 'error'; updateCompoundsSetupUI();
+    }
+  }, 10000);
+  if (usedCache) updateCompoundsSetupUI();
+}
+
+/*══════════════════════════════════════════════
+  GRID SHAPE
+  Every level gets its own random shape rather than a fixed symmetric
+  diamond: the bottom (start) row is 2-5 cells wide, rolled fresh each time,
+  and every row moving upward changes by exactly ±1 cell from the row below
+  it — a bounded random walk, floor-clamped at MIN_ROW_WIDTH (2). The clamp
+  never actually breaks the ±1 rule — right at the floor it just forces the
+  step to be +1 instead of -1, so no two adjacent rows are ever the same
+  width. Always exactly 10 rows tall (SIZE is fixed below — there's no
+  grid-size setting any more).
+
+  Rows are rendered centered, so each cell visually straddles the boundary
+  between one or two cells in the adjacent row — see
+  rowSpan()/overlappingIndices() below, which is what turns that offset into
+  the correct up-neighbor(s) for gameplay, purely from centered-layout
+  geometry. That logic is fully generic over ANY row-length sequence,
+  symmetric or not, which is exactly why swapping the shape generator here
+  needed no changes anywhere else.
+
+  There's no manual difficulty control either — difficulty instead ramps up
+  stage-by-stage via a growing number of randomly placed impassable
+  ("blocked") cells — see STAGES below.
+══════════════════════════════════════════════*/
+const MIN_ROW_WIDTH = 2;
+const START_ROW_MAX_WIDTH = 5; // bottom row is randomized in [MIN_ROW_WIDTH, START_ROW_MAX_WIDTH]
+
+function buildRowLengths(rows) {
+  const lens = new Array(rows);
+  lens[rows - 1] = MIN_ROW_WIDTH + Math.floor(Math.random() * (START_ROW_MAX_WIDTH - MIN_ROW_WIDTH + 1));
+  for (let i = rows - 2; i >= 0; i--) {
+    const prev = lens[i + 1];
+    let step = Math.random() < 0.5 ? -1 : 1;
+    if (prev + step < MIN_ROW_WIDTH) step = 1; // never dip below the floor — step up instead
+    lens[i] = prev + step;
+  }
+  return lens;
+}
+
+// Centered horizontal span of cell `idx` within a row of length `len` (cell
+// width = 1 unit). Used purely to figure out which cells in one row overlap
+// which cells in the row above — see overlappingIndices().
+function rowSpan(len, idx) {
+  const start = idx - len / 2;
+  return [start, start + 1];
+}
+
+function cellCenter(row, col) {
+  const [s, e] = rowSpan(ROW_LENGTHS[row], col);
+  return (s + e) / 2;
+}
+
+function overlappingIndices(myLen, myIdx, otherLen) {
+  const [s, e] = rowSpan(myLen, myIdx);
+  const out = [];
+  for (let j = 0; j < otherLen; j++) {
+    const [os, oe] = rowSpan(otherLen, j);
+    if (os < e - 1e-6 && oe > s + 1e-6) out.push(j);
+  }
+  return out;
+}
+
+function upNeighbors(row, col) {
+  if (row === 0) return [];
+  return overlappingIndices(ROW_LENGTHS[row], col, ROW_LENGTHS[row - 1]).map(c => [row - 1, c]);
+}
+
+// The reverse of upNeighbors — cells in the row BELOW that horizontally
+// overlap this one. Never used for unlocking (the game only ever unlocks
+// up/same-row), only for free navigation: multiple branches can be
+// available at once, so the player may want to move back down to one.
+function downNeighbors(row, col) {
+  if (row === SIZE - 1) return [];
+  return overlappingIndices(ROW_LENGTHS[row], col, ROW_LENGTHS[row + 1]).map(c => [row + 1, c]);
+}
+
+function sameRowNeighbors(row, col) {
+  const out = [];
+  if (col > 0) out.push([row, col - 1]);
+  if (col < ROW_LENGTHS[row] - 1) out.push([row, col + 1]);
+  return out;
+}
+
+/*══════════════════════════════════════════════
+  STAGES
+  A climb is 10 stages on the same size grid. Stage 1 is the clean diamond.
+  Stage N (N>=2) randomly blocks N cells (✕, permanently impassable) before
+  the stage starts — always chosen so at least one legal route from the
+  bottom row to the top still exists. Reaching the top clears the stage and
+  immediately deals the next one; clearing stage 10 wins the whole climb.
+══════════════════════════════════════════════*/
+const MAX_STAGE = 10;
+
+// Japanese ordinal stage labels, alongside the English — a nice fit for a
+// Japanese-study app, and what actually shows on screen while playing (see
+// updateStats()/showStageBriefing()/openStageGate()).
+const JP_ORDINALS = ['', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+function stageNameJP(stage, isBoss) {
+  return isBoss ? '⚔ 大ボス戦' : `第${JP_ORDINALS[stage] || stage}ステージ`;
+}
+function stageNameEN(stage, isBoss) {
+  return isBoss ? '⚔ Boss Battle' : `Stage ${stage} / ${MAX_STAGE}`;
+}
+
+// Alan: "rename the stages" — each stage (and the boss) is themed after a
+// figure from Japanese history/legend rather than shown as a bare number.
+// stageNameJP()/stageNameEN() above still track plain position (used in the
+// header line and internally) — this is the flavor name shown alongside it.
+const STAGE_THEMES = {
+  1: { name: 'Hattori Hanzō', role: 'Ninja' },
+  2: { name: 'Miyamoto Musashi', role: 'Swordsman' },
+  3: { name: 'Minamoto no Yoshitsune', role: 'Legendary warrior' },
+  4: { name: 'Oda Nobunaga', role: 'Warlord' },
+  5: { name: 'Toyotomi Hideyoshi', role: 'Unifier' },
+  6: { name: 'Tokugawa Ieyasu', role: 'Shogun' },
+  7: { name: 'Tomoe Gozen', role: 'Warrior' },
+  8: { name: 'Sakamoto Ryōma', role: 'Revolutionary' },
+  9: { name: 'Saigō Takamori', role: 'Rebel' },
+  10: { name: 'Emperor Jimmu', role: 'Legendary founder' },
+  boss: { name: 'Izanagi', role: 'Final Boss', emoji: '👑' },
+};
+function stageTheme(stage, isBoss) {
+  return STAGE_THEMES[isBoss ? 'boss' : stage] || { name: '', role: '' };
+}
+function stageThemeName(stage, isBoss) {
+  const t = stageTheme(stage, isBoss);
+  if (!t.name) return '';
+  return (t.emoji ? t.emoji + ' ' : '') + t.name + ' — ' + t.role;
+}
+
+function stageBlockedCount(stage) {
+  return stage <= 1 ? 0 : stage;
+}
+
+/*══════════════════════════════════════════════
+  STAGE MODE SEQUENCE
+  Each stage (and the boss) is locked to a fixed set of answer modes —
+  Alan's spec, no setup-screen choice. A single-entry pool means every cell
+  that stage uses the one mode; a multi-entry ("Mixed") pool means each open
+  cell independently rolls its OWN mode from it at grid-build time — see
+  assignCellModesAndItems() in newGrid() — so a "Mixed" board genuinely
+  mixes cell-by-cell rather than picking one mode for the whole stage.
+  Kanji mode:
+    1 J→E · 2 E→J · 3 Mixed J/E · 4 J→E · 5 E→J · 6 Mixed J/E ·
+    7 J→Kun'yomi · 8 J→On'yomi · 9 Mixed On/Kun · 10 Mixed ALL ·
+    ⚔ Boss: Mixed ALL
+  Compounds mode (item 8 — no on'yomi/kun'yomi distinction for a compound,
+  so the "reading" stages take their place; stage 8 fills the gap left by
+  there being only one On/Kun-style stage worth of reading content with
+  another Mixed J/E round rather than inventing a reading pairing that
+  doesn't exist for compounds):
+    1 J→E · 2 E→J · 3 Mixed J/E · 4 J→E · 5 E→J · 6 Mixed J/E ·
+    7 J→Reading · 8 Mixed J/E · 9 Reading→J · 10 Mixed ALL ·
+    ⚔ Boss: Mixed ALL
+══════════════════════════════════════════════*/
+const KANJI_STAGE_MODE_POOLS = {
+  1: ['j2e'],
+  2: ['e2j'],
+  3: ['j2e', 'e2j'],
+  4: ['j2e'],
+  5: ['e2j'],
+  6: ['j2e', 'e2j'],
+  7: ['kun'],
+  8: ['on'],
+  9: ['on', 'kun'],
+  10: ['j2e', 'e2j', 'on', 'kun'],
+  boss: ['j2e', 'e2j', 'on', 'kun'],
+};
+const COMPOUND_STAGE_MODE_POOLS = {
+  1: ['j2e'],
+  2: ['e2j'],
+  3: ['j2e', 'e2j'],
+  4: ['j2e'],
+  5: ['e2j'],
+  6: ['j2e', 'e2j'],
+  7: ['j2r'],
+  8: ['j2e', 'e2j'],
+  9: ['r2j'],
+  10: ['j2e', 'e2j', 'j2r', 'r2j'],
+  boss: ['j2e', 'e2j', 'j2r', 'r2j'],
+};
+function stageModePoolsForMode() {
+  return gameMode === 'compounds' ? COMPOUND_STAGE_MODE_POOLS : KANJI_STAGE_MODE_POOLS;
+}
+
+function stageModePool(stage, isBoss) {
+  return stageModePoolsForMode()[isBoss ? 'boss' : stage] || ['j2e'];
+}
+
+// A short human-readable label for what a stage/the boss asks — used on the
+// setup screen's stage-plan summary and the per-stage briefing.
+function stageModeSummary(stage, isBoss) {
+  const pool = stageModePool(stage, isBoss);
+  if (pool.length > 1) {
+    if (pool.length === 4) return 'Mixed ALL';
+    if (pool.includes('on') && pool.includes('kun') && pool.length === 2) return 'Mixed On/Kun';
+    return 'Mixed J/E';
+  }
+  const m = pool[0];
+  if (m === 'j2e') return 'J → E (meaning)';
+  if (m === 'e2j') return 'E (meaning) → J';
+  if (m === 'kun') return "J → Kun'yomi";
+  if (m === 'on') return "J → On'yomi";
+  if (m === 'j2r') return 'J → Reading';
+  if (m === 'r2j') return 'Reading → J';
+  return m;
+}
+
+/*══════════════════════════════════════════════
+  BOSS BATTLE
+  Clearing stage 10 doesn't end the climb — it opens one final capstone
+  level. The grid resets to a clean diamond (no blocked ✕ cells at all), but
+  every cell above the start row is hidden: only the bottom two spaces show
+  their kanji up front. Selecting any other space reveals it AND commits you
+  to it — get it wrong and the whole climb ends immediately, no second
+  chances and no routing around it like a normal wrong answer.
+══════════════════════════════════════════════*/
+
+// Same reachability logic as isTopReachable() below, but usable BEFORE the
+// `grid` array exists — it works purely off ROW_LENGTHS and a candidate
+// blocked-cell set, assuming every non-blocked cell is open. Used only to
+// validate a candidate obstacle layout at stage-generation time.
+function boardReachable(blockedSet) {
+  const visited = ROW_LENGTHS.map(len => new Array(len).fill(false));
+  const stack = [];
+  const bottom = ROW_LENGTHS.length - 1;
+  for (let c = 0; c < ROW_LENGTHS[bottom]; c++) {
+    if (blockedSet.has(bottom + ',' + c)) continue;
+    visited[bottom][c] = true;
+    stack.push([bottom, c]);
+  }
+  while (stack.length) {
+    const [r, c] = stack.pop();
+    if (r === 0) return true;
+    const neighbors = [...upNeighbors(r, c), ...sameRowNeighbors(r, c)];
+    for (const [nr, nc] of neighbors) {
+      if (visited[nr][nc]) continue;
+      if (blockedSet.has(nr + ',' + nc)) continue;
+      visited[nr][nc] = true;
+      stack.push([nr, nc]);
+    }
+  }
+  return false;
+}
+
+// Greedily blocks up to `count` random cells (never in the bottom/start row),
+// skipping any candidate that would cut off every route to the top. May
+// return fewer than `count` cells on a very constrained grid — a guaranteed
+// route always wins over hitting the exact requested obstacle count.
+function pickBlockedCells(count) {
+  const blocked = new Set();
+  if (count <= 0) return blocked;
+  const candidates = [];
+  for (let r = 0; r < ROW_LENGTHS.length - 1; r++) {
+    for (let c = 0; c < ROW_LENGTHS[r]; c++) candidates.push(r + ',' + c);
+  }
+  shuffle(candidates).forEach((key) => {
+    if (blocked.size >= count) return;
+    blocked.add(key);
+    if (!boardReachable(blocked)) blocked.delete(key);
+  });
+  return blocked;
+}
+
+/*══════════════════════════════════════════════
+  GAME STATE
+  Grid is stored row-major, row 0 = TOP of the board (the win row), the last
+  row = BOTTOM (the start row) — matches visual layout directly since rows
+  render in array order, top to bottom. Row lengths vary per ROW_LENGTHS
+  (see GRID SHAPE above), so grid[row].length is NOT constant across rows.
+══════════════════════════════════════════════*/
+const SIZE = 10;        // number of rows — always 10, per spec; no grid-size setting any more
+let ROW_LENGTHS = [];
+// Per-cell answer mode ('j2e'|'e2j'|'on'|'kun', or 'j2e'|'e2j'|'j2r'|'r2j'
+// for Compounds) replaced the old single global answerMode — each stage is
+// locked to its own fixed mode pool (see KANJI_STAGE_MODE_POOLS/
+// COMPOUND_STAGE_MODE_POOLS above), assigned cell-by-cell in newGrid().
+// 'click' | 'type' — the setup screen no longer offers a choice (Alan:
+// "the ability to select from touch on the screen - no input option
+// necessary"), so this always stays 'click' now — touch and mouse clicks
+// both fire the same click events, so nothing else needs to change for
+// mobile. The 'type' branches deeper in the file (the answer-bar text
+// input, the Enter-to-submit keydown handler) are harmless dead code left
+// in place rather than ripped out, in case a keyboard-entry mode is ever
+// wanted again for a desktop-only build.
+let inputMode = 'click';
+// 'kanji' | 'compounds' — which sheet/item family this climb draws from,
+// chosen via the setup-screen tabs (see setupTab below) and locked in at
+// Start Climb, same as everything else on that screen. Drives which stage
+// mode-pool table applies (stageModePoolsForMode()), which item builder
+// runs (assignCellModesAndItems()), and which localStorage key the record
+// book reads/writes (see recordsStorageKeyFor()).
+let gameMode = 'kanji';
+// 'specific' (one WK level) | 'range' (min/max) | 'none' (no WK level at all)
+// | 'master' (everything). Only 'range' — or a blank 'specific' field — is
+// ever ineligible for the per-level record book; see getRecordLevel() below.
+let levelMode = 'specific';
+let currentStage = 1;
+let isBossStage = false; // the capstone level after stage 10 — see STAGES above
+let grid = [];        // grid[row][col] = { item, state, revealed }  state: locked|available|cleared|wrong|blocked
+let clearedCount = 0;
+let wrongCount = 0;
+let selected = null;   // {row, col} of the currently keyboard/tap-selected cell
+let gameOver = false;
+
+// Compounds-only: the currently chosen Category filter value, or 'all' if
+// unset/not on the compounds tab. Reads a plain <select> — no segmented
+// control needed since there are 44 of them (populated dynamically off the
+// loaded data itself, see populateCategoryFilter()).
+function getCategoryFilter() {
+  const el = document.getElementById('categoryFilter');
+  return (el && el.value) || 'all';
+}
+
+// Only falls back to the unfiltered set when a filter matches NOTHING at
+// all — otherwise the (possibly small) filtered pool is used as-is and
+// newGrid() below fills the grid by cycling through it with repeats.
+// Filters by WK level selection (both modes) and, for Compounds, Category —
+// NOT by reading availability. Reading availability (a cell asking for
+// on'yomi/a compound's reading needs an item that HAS one) is a per-CELL
+// concern since the fixed stage sequence can mix several answer modes on
+// the very same board — see assignCellModesAndItems() in newGrid(), which
+// is where that per-mode compatibility is actually enforced now.
+function pickPool() {
+  let base = gameMode === 'compounds' ? COMPOUNDS_ALL : ALL;
+  if (gameMode === 'compounds') {
+    const cat = getCategoryFilter();
+    if (cat !== 'all') {
+      const byCategory = base.filter(k => k.category === cat);
+      if (byCategory.length) base = byCategory;
+    }
+  }
+  // 'master' and 'none' aren't expressible as a numeric from/to range, so
+  // they're handled directly here; 'specific' and 'range' still go through
+  // getWkFilterRange() below, unchanged from before.
+  if (levelMode === 'master') return base;
+  if (levelMode === 'none') {
+    const filtered = base.filter(k => k.wk == null);
+    return filtered.length ? filtered : base;
+  }
+
+  const { from, to } = getWkFilterRange();
+  if (from == null && to == null) return base;
+  const filtered = base.filter(k => k.wk != null && (from == null || k.wk >= from) && (to == null || k.wk <= to));
+  return filtered.length ? filtered : base;
+}
+
+// Single source of truth for "what WK levels is this climb drawing from" in
+// the two numeric-range modes — feeds pickPool() above.
+function getWkFilterRange() {
+  if (levelMode === 'range') {
+    const from = Number(document.getElementById('wkFrom').value) || null;
+    const to   = Number(document.getElementById('wkTo').value) || null;
+    return { from, to };
+  }
+  const lvl = Number(document.getElementById('wkLevel').value) || null;
+  return { from: lvl, to: lvl };
+}
+
+// The key this climb's run would update in the per-level record book (see
+// below), or null if this selection has nothing meaningful to key off — only
+// a 'specific' level left blank, or a range with BOTH ends left blank
+// (fully unrestricted), are untracked. A range with at least one bound set
+// still records — credited to its lowest (floor) level, per Alan's call: a
+// range is still worth scoring, it just isn't precise enough to spread
+// across every level it touches, so it's booked against the one at its foot.
+// Compounds-only: narrowing to one specific Category is the same kind of
+// "too imprecise to book against a single level" situation, except there's
+// no floor to fall back to (a category isn't a level at all) — so it's
+// simply untracked, same as an unrestricted "leave everything blank" climb.
+function getRecordLevel() {
+  if (gameMode === 'compounds' && getCategoryFilter() !== 'all') return null;
+  if (levelMode === 'none') return 'none';
+  if (levelMode === 'master') return 'master';
+  if (levelMode === 'range') {
+    const from = Number(document.getElementById('wkFrom').value) || null;
+    const to   = Number(document.getElementById('wkTo').value) || null;
+    if (from != null) return from;
+    if (to != null) return to; // only an upper bound was given — that's the only floor there is
+    return null;
+  }
+  return Number(document.getElementById('wkLevel').value) || null;
+}
+
+/*══════════════════════════════════════════════
+  PER-WK-LEVEL RECORD BOOK
+  Only ever written when a climb is locked to something recordable
+  (recordLevel set in startGame() from getRecordLevel()) — a specific WK
+  level, 'none' (no WK level at all), 'master' (everything), or a range
+  (credited to its lowest bound). A 'specific' level left blank, or a range
+  with both ends left blank, is fully playable but never eligible —
+  recordLevel is null and nothing is written. Fields per level, each updated
+  only when actually beaten:
+    bestScore — Alan's spec: elapsed time in whole seconds (from climb start
+      to whenever the run ended, win or lose) minus 20 points for every wrong
+      answer AND every boss Peek used (peeksUsed; see the PEEK button below).
+      This is written on EVERY run that ends while recordLevel is set — a
+      partial climb ("as far as they got") scores exactly like a full one,
+      just with less elapsed time and (usually) fewer mistakes to punish it.
+      Higher is better; see computeRunScore().
+    stageBestTimesMs — { '1': ms, ..., '10': ms, 'boss': ms } fastest time to
+      actually CLEAR each individual stage. Only a genuine clear counts (the
+      final in-progress segment of a run that ended in a LOSS is excluded —
+      see the clearedEntries split in endGame()).
+    bestTimeMs — fastest total climb time (stages 1-10 + boss combined),
+      only set on an actual full win (a "speedrun" record, distinct from
+      bestScore above).
+    bossBestScore/bossBestRevealed/bossBestTotal — the boss battle's "kept
+      hidden" tally: (open cells) - (cells actually revealed, INCLUDING any
+      voluntary Peeks) by the time the boss battle is won. Higher is better;
+      shown alongside bestScore as a boss-specific detail.
+    stagesBestWrong/stagesBestCorrect — fewest total wrong answers across
+      stages 1-10 specifically (a narrower, older stat kept for reference
+      alongside the unified bestScore above).
+══════════════════════════════════════════════*/
+const CLIMB_RECORDS_KEY = 'kanji-climb-records-v1';
+const CLIMB_COMPOUNDS_RECORDS_KEY = 'kanji-climb-compounds-records-v1';
+// Kanji-mode and Compounds-mode keep entirely separate record books (a WK
+// level's kanji climb and its compounds climb are different challenges) —
+// see the Records tab, which reads both.
+function recordsStorageKeyFor(mode) {
+  return mode === 'compounds' ? CLIMB_COMPOUNDS_RECORDS_KEY : CLIMB_RECORDS_KEY;
+}
+
+function loadRecords() {
+  try {
+    const raw = localStorage.getItem(recordsStorageKeyFor(gameMode));
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) { return {}; }
+}
+function saveRecords(recs) {
+  try { localStorage.setItem(recordsStorageKeyFor(gameMode), JSON.stringify(recs)); } catch (e) {}
+}
+function getLevelRecord(level) {
+  if (level == null) return null;
+  return loadRecords()[String(level)] || null;
+}
+// Merges `patch` into that level's stored record and returns the merged
+// record — never overwrites fields not present in patch.
+function updateLevelRecord(level, patch) {
+  if (level == null) return null;
+  const recs = loadRecords();
+  const key = String(level);
+  const merged = Object.assign({}, recs[key] || {}, patch);
+  recs[key] = merged;
+  saveRecords(recs);
+  return merged;
+}
+
+function formatTime(ms) {
+  const totalSec = Math.max(0, Math.round(ms / 1000));
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return m + ':' + String(s).padStart(2, '0');
+}
+
+/*══════════════════════════════════════════════
+  RECORDS VIEW (Alan: "see all my best score and previous best times for
+  each level from the home screen"). Reads whichever record book directly
+  by key — unlike loadRecords()/getLevelRecord() above, this never touches
+  the live `gameMode`, since the modal shows both books via its own Kanji/
+  Compounds tabs regardless of which climb is currently selected on the
+  setup screen behind it.
+══════════════════════════════════════════════*/
+function loadRecordsForMode(mode) {
+  try {
+    const raw = localStorage.getItem(recordsStorageKeyFor(mode));
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) { return {}; }
+}
+
+// Sorts numeric levels in order, with 'none' first (no WK level at all —
+// conceptually "below" level 1) and 'master' last (everything, so it goes
+// after every specific level).
+function levelSortKey(k) {
+  if (k === 'none') return -1;
+  if (k === 'master') return Infinity;
+  const n = Number(k);
+  return Number.isFinite(n) ? n : Infinity;
+}
+function levelDisplayName(k) {
+  if (k === 'none') return 'No WK Level';
+  if (k === 'master') return 'Master (All)';
+  return 'Level ' + k;
+}
+
+let recordsModalMode = 'kanji';
+
+// The Level filter's option list is rebuilt from whichever book (kanji/
+// compounds) is currently showing — the two books rarely share the exact
+// same set of recorded levels, so this always reflects what's actually
+// there rather than a fixed 1-60 dropdown full of empty entries.
+function populateRecordsLevelFilter() {
+  const sel = document.getElementById('recordsLevelFilter');
+  if (!sel) return;
+  const keys = Object.keys(loadRecordsForMode(recordsModalMode)).sort((a, b) => levelSortKey(a) - levelSortKey(b));
+  sel.innerHTML = '<option value="all">All levels</option>' +
+    keys.map(k => `<option value="${esc(k)}">${esc(levelDisplayName(k))}</option>`).join('');
+  sel.value = 'all';
+}
+
+function getRecordsLevelFilter() {
+  const el = document.getElementById('recordsLevelFilter');
+  return (el && el.value) || 'all';
+}
+
+// "All levels" — the original one-row-per-level summary (score/full-climb
+// time/boss).
+function renderRecordsSummaryTable() {
+  document.getElementById('recordsTableHead').innerHTML =
+    '<tr><th>Level</th><th>Best Score</th><th>Best Full-Climb Time</th><th>Boss (kept hidden)</th></tr>';
+  const recs = loadRecordsForMode(recordsModalMode);
+  const keys = Object.keys(recs).sort((a, b) => levelSortKey(a) - levelSortKey(b));
+  const tbody = document.getElementById('recordsTableBody');
+  if (!keys.length) {
+    const modeLabel = recordsModalMode === 'compounds' ? 'Compounds' : 'Kanji';
+    tbody.innerHTML = `<tr><td colspan="4" class="records-empty">No ${esc(modeLabel)} records yet — climb something!</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = keys.map((k) => {
+    const r = recs[k] || {};
+    const score = r.bestScore != null ? String(r.bestScore) : '—';
+    const time = r.bestTimeMs != null ? formatTime(r.bestTimeMs) : '—';
+    const boss = (r.bossBestScore != null && r.bossBestTotal != null)
+      ? `${r.bossBestScore}/${r.bossBestTotal} kept hidden`
+      : '—';
+    return `<tr><td>${esc(levelDisplayName(k))}</td><td class="num">${esc(score)}</td><td class="num">${esc(time)}</td><td class="num">${esc(boss)}</td></tr>`;
+  }).join('');
+}
+
+// One specific level — every stage's own best clear time (Alan: "see the
+// best times per stage"), the same per-stage breakdown the in-game briefing
+// banner and stage gate already draw on (stageBestTimesMs), rather than
+// only the single best-of-the-whole-climb figure the summary table shows.
+function renderRecordsStageTable(levelKey) {
+  document.getElementById('recordsTableHead').innerHTML = '<tr><th>Stage</th><th>Best Time</th></tr>';
+  const rec = loadRecordsForMode(recordsModalMode)[levelKey];
+  const tbody = document.getElementById('recordsTableBody');
+  if (!rec) {
+    tbody.innerHTML = `<tr><td colspan="2" class="records-empty">No record yet for ${esc(levelDisplayName(levelKey))}.</td></tr>`;
+    return;
+  }
+  const times = rec.stageBestTimesMs || {};
+  const rows = [];
+  for (let s = 1; s <= 10; s++) {
+    const ms = times[String(s)];
+    rows.push(`<tr><td>Stage ${s}</td><td class="num">${ms != null ? esc(formatTime(ms)) : '—'}</td></tr>`);
+  }
+  rows.push(`<tr><td>⚔ Boss</td><td class="num">${times.boss != null ? esc(formatTime(times.boss)) : '—'}</td></tr>`);
+  tbody.innerHTML = rows.join('');
+}
+
+function renderRecordsTable() {
+  const filter = getRecordsLevelFilter();
+  if (filter === 'all') renderRecordsSummaryTable();
+  else renderRecordsStageTable(filter);
+}
+
+function openRecordsModal() {
+  recordsModalMode = gameMode === 'compounds' ? 'compounds' : 'kanji';
+  document.querySelectorAll('#recordsModeTabs button').forEach(b => b.classList.toggle('active', b.dataset.rmode === recordsModalMode));
+  populateRecordsLevelFilter();
+  renderRecordsTable();
+  document.getElementById('recordsModal').classList.add('open');
+}
+function closeRecordsModal() {
+  document.getElementById('recordsModal').classList.remove('open');
+}
+
+document.getElementById('btnShowRecords').addEventListener('click', openRecordsModal);
+document.getElementById('btnCloseRecords').addEventListener('click', closeRecordsModal);
+document.getElementById('recordsModal').addEventListener('click', (e) => {
+  if (e.target.id === 'recordsModal') closeRecordsModal(); // click on the backdrop, not the card
+});
+document.getElementById('recordsModeTabs').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-rmode]');
+  if (!btn) return;
+  recordsModalMode = btn.dataset.rmode;
+  document.querySelectorAll('#recordsModeTabs button').forEach(b => b.classList.toggle('active', b === btn));
+  populateRecordsLevelFilter(); // the two books rarely share the same recorded levels
+  renderRecordsTable();
+});
+document.getElementById('recordsLevelFilter').addEventListener('change', renderRecordsTable);
+
+function shuffle(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+/*══════════════════════════════════════════════
+  TIMER
+  stageStartTime marks the moment the CURRENT stage (or the boss battle)
+  began; the header's live display always shows time-on-this-stage.
+  stageTimes accumulates a { stage, ms } entry for every segment played —
+  pushed by onStageWin() for a stage actually cleared, and by endGame() for
+  whatever segment was in progress when the climb ended (a loss, or the boss
+  battle either way) — so the sum always covers the whole climb regardless
+  of how it ended.
+══════════════════════════════════════════════*/
+let stageStartTime = 0;
+let stageTimes = [];
+let timerInterval = null;
+let recordLevel = null;         // WK level this climb is scored against, or null if untracked (range/blank)
+let stagesRecordBeaten = false; // did stages 1-10 just beat the stored record for recordLevel?
+let stagesCheckpointWrong = null; // wrongCount snapshotted when stages 1-10 were cleared (null if the boss was never reached)
+let peeksUsed = 0; // boss-only: voluntary reveals via the Peek button (see below) — each one costs 20 points, same as a wrong answer
+
+function updateTimerDisplay() {
+  const el = document.getElementById('statTimer');
+  if (!el) return;
+  el.textContent = '⏱ ' + formatTime(Date.now() - stageStartTime);
+}
+
+// Builds one { item, mode } pair per open cell for the CURRENT stage (or the
+// boss). Mode is rolled independently per cell from stageModePool() — that's
+// the actual "per-cell mixing" for a Mixed stage — and the item handed to
+// that cell is always drawn from the sub-pool that genuinely supports the
+// mode it rolled (itemSupportsMode()), so a 'kun' cell can never end up with
+// an item that has no kun'yomi to answer with. If a rolled mode turns out to
+// have NO compatible items at all in the current (possibly small, WK-level-
+// filtered) pool, that mode is dropped from consideration entirely for this
+// grid — 'j2e'/'e2j' are the ultimate fallback since every item qualifies
+// for them by construction (applyClimbRows only keeps kanji+meaning rows).
+function assignCellModesAndItems(openCells) {
+  const itemBuilder = gameMode === 'compounds' ? toCompoundItem : toClimbItem;
+  const pool = shuffle(pickPool()).map(itemBuilder);
+  const stagePool = stageModePool(currentStage, isBossStage);
+
+  const itemsByMode = {};
+  stagePool.forEach((m) => {
+    const list = pool.filter((it) => itemSupportsMode(it, m));
+    if (list.length) itemsByMode[m] = list;
+  });
+  const effectiveModes = stagePool.filter((m) => itemsByMode[m]);
+  if (!effectiveModes.length) { itemsByMode.j2e = pool; effectiveModes.push('j2e'); }
+
+  // Per-mode cursors so repeats cycle through that mode's own sub-pool
+  // predictably, same spirit as the old shared "cycle with repeats" fill.
+  const cursors = {};
+  effectiveModes.forEach((m) => { cursors[m] = 0; });
+
+  const out = [];
+  for (let i = 0; i < openCells; i++) {
+    const mode = effectiveModes[Math.floor(Math.random() * effectiveModes.length)];
+    const list = itemsByMode[mode];
+    const item = list[cursors[mode] % list.length];
+    cursors[mode]++;
+    out.push({ item, mode });
+  }
+  return out;
+}
+
+function newGrid() {
+  gameOver = false;
+  selected = null;
+  stageStartTime = Date.now();
+  updateTimerDisplay();
+  document.getElementById('endBanner').classList.remove('open');
+
+  ROW_LENGTHS = buildRowLengths(SIZE);
+  const totalCells = ROW_LENGTHS.reduce((a, b) => a + b, 0);
+
+  // The boss battle always resets to a clean board — no ✕ obstacles.
+  const blocked = isBossStage ? new Set() : pickBlockedCells(stageBlockedCount(currentStage));
+  const openCells = totalCells - blocked.size;
+
+  const cellModesAndItems = assignCellModesAndItems(openCells);
+
+  grid = [];
+  let idx = 0;
+  for (let row = 0; row < SIZE; row++) {
+    const rowArr = [];
+    for (let col = 0; col < ROW_LENGTHS[row]; col++) {
+      if (blocked.has(row + ',' + col)) {
+        rowArr.push({ item: null, mode: null, state: 'blocked', revealed: true });
+      } else {
+        // Normal stages show every kanji up front (locked cells are just
+        // dimmed, not hidden). The boss stage hides everything except the
+        // bottom row until a space is actually selected.
+        const revealed = !isBossStage || row === SIZE - 1;
+        const { item, mode } = cellModesAndItems[idx++];
+        rowArr.push({ item, mode, state: row === SIZE - 1 ? 'available' : 'locked', revealed });
+      }
+    }
+    grid.push(rowArr);
+  }
+  buildAnswerChoices();
+  renderAnswerChoices();
+  renderGrid();
+  updateStats();
+  selectFirstAvailable();
+  showStageBriefing();
+}
+
+/*══════════════════════════════════════════════
+  CLICK-TO-SELECT ANSWER PANEL (input mode "click", or any e2j cell — see
+  cellForcesClick())
+  One box per currently-open (non-blocked) cell on the board, shuffled once
+  per newGrid() call. Which cell a box's text originally came from doesn't
+  matter and is never tracked — a click just runs that box's own
+  acceptedTokensFor(...) token through the *same* checkAnswer() a typed
+  answer uses, so a box is "correct" exactly when its token is one of the
+  accepted answers for whichever cell is currently selected — regardless of
+  which mode either cell was in. That reuse is what keeps click-mode and
+  type-mode scoring identical with no separate cell<->box identity
+  bookkeeping, what makes a "Mixed" board's jumble of English/kanji/reading
+  boxes work with zero extra logic, and what makes it safe even when the
+  (possibly small) item pool repeats the same kanji on multiple cells.
+══════════════════════════════════════════════*/
+let choiceBoxes = []; // [{ token, label, used, category }]
+
+function buildAnswerChoices() {
+  choiceBoxes = [];
+  for (let row = 0; row < SIZE; row++) {
+    for (let col = 0; col < ROW_LENGTHS[row]; col++) {
+      const cell = grid[row][col];
+      if (cell.state === 'blocked' || !cell.item) continue;
+      const token = (acceptedTokensFor(cell.item, cell.mode) || [])[0];
+      if (!token) continue;
+      // Each box is colored/sized by its own cell's answer category (see
+      // the "Answer-type color language" CSS block) — an e2j/r2j box's
+      // label IS the kanji answer, not an English gloss/reading, so
+      // .ans-kanji also gets a distinct bigger treatment on render.
+      choiceBoxes.push({ token, label: primaryFor(cell.item, cell.mode), used: false, category: answerCategory(cell.mode) });
+    }
+  }
+  choiceBoxes = shuffle(choiceBoxes);
+}
+
+function renderAnswerChoices() {
+  const panel = document.getElementById('choicesPanel');
+  panel.innerHTML = '';
+  choiceBoxes.forEach((box, idx) => {
+    const btn = document.createElement('button');
+    btn.className = 'choice-box ans-' + box.category;
+    btn.type = 'button';
+    btn.textContent = box.label;
+    btn.disabled = box.used || gameOver;
+    btn.dataset.idx = idx;
+    panel.appendChild(btn);
+  });
+}
+
+function handleChoiceClick(idx) {
+  if (gameOver || phase !== 'playing' || !selected) return;
+  const box = choiceBoxes[idx];
+  if (!box || box.used) return;
+  const correct = checkAnswer(box.token);
+  if (correct) {
+    box.used = true;
+    renderAnswerChoices();
+  } else {
+    // Same spirit as the input's "Not quite" feedback — a brief flash on the
+    // box that was tried. It stays clickable: the same wording may still be
+    // the right answer for a different cell later.
+    const el = document.querySelector(`.choice-box[data-idx="${idx}"]`);
+    if (el) {
+      el.classList.add('flash-wrong');
+      setTimeout(() => el.classList.remove('flash-wrong'), 400);
+    }
+  }
+}
+
+document.getElementById('choicesPanel').addEventListener('click', (e) => {
+  const btn = e.target.closest('.choice-box');
+  if (!btn || btn.disabled) return;
+  handleChoiceClick(Number(btn.dataset.idx));
+});
+
+function computeCellSize() {
+  const gridEl = document.getElementById('grid');
+  const wrap = gridEl.parentElement;
+  const peakWidth = Math.max(...ROW_LENGTHS, 1);
+  const rows = ROW_LENGTHS.length || 1;
+  const gap = 8;
+  const pad = 36; // roughly matches .game-wrap's own padding on each axis
+  const availW = (wrap && typeof wrap.clientWidth === 'number' && wrap.clientWidth > 0) ? wrap.clientWidth - pad : 600;
+  const availH = (wrap && typeof wrap.clientHeight === 'number' && wrap.clientHeight > 0) ? wrap.clientHeight - pad : 600;
+  // Fit BOTH dimensions at once ("contain", not just width) so the whole
+  // diamond — however tall — always fits on screen with no scrolling.
+  const sizeByWidth  = Math.floor((availW - (peakWidth - 1) * gap) / peakWidth);
+  const sizeByHeight = Math.floor((availH - (rows - 1) * gap) / rows);
+  let size = Math.min(sizeByWidth, sizeByHeight);
+  if (!Number.isFinite(size) || size <= 0) size = 40;
+  size = Math.max(14, Math.min(size, 140));
+  gridEl.style.setProperty('--cell-size', size + 'px');
+  gridEl.style.setProperty('--cell-font', Math.max(8, Math.floor(size * 0.42)) + 'px');
+  gridEl.style.setProperty('--cell-gap', gap + 'px');
+  return size;
+}
+
+// Shared by the grid cells, the "current question" bar, and the choice-box /
+// wrong-cell correction badges: a cell's text can be a 1-2 character kanji
+// OR a whole English meaning phrase (once e2j cells entered the mix — see
+// KANJI_STAGE_MODE_POOLS/COMPOUND_STAGE_MODE_POOLS), and no single fixed
+// font size fits both. Short text
+// (kanji, a reading) keeps the normal/base size; longer text shrinks (with
+// a floor) so it wraps instead of overflowing its box.
+function fitTextFontPx(text, basePx, minPx) {
+  const len = String(text || '').length;
+  if (len <= 3) return basePx;
+  const scale = Math.sqrt(3 / len);
+  return Math.max(minPx, Math.round(basePx * scale));
+}
+
+// An e2j cell shows a whole English meaning (and an r2j cell a full
+// reading), not a single kanji glyph — give it real horizontal room (a
+// wider box) instead of only shrinking the font down to fit a box sized for
+// one character. Only widens once the text is actually showing (revealed)
+// — an unrevealed boss cell still just shows '？' and stays the normal
+// square.
+//
+// Compounds mode also shows the kanji itself as the FACE in j2e/j2r (and
+// any mixed-stage cell that rolls one of those) — but unlike kanji mode,
+// that "kanji" can be a 2-4 character compound word, not one glyph. A box
+// sized for a single character just wraps it, and since CJK text has no
+// natural word-break point, that wrap lands between every character —
+// reading as a vertical column instead of the horizontal word it is (Alan:
+// "needs to be displayed horizontal... fix the box"). Each kanji glyph is
+// roughly as wide as it is tall, so this widens close to linearly with the
+// character count rather than the flatter 1.8x used for English/readings.
+function cellBoxWidthPx(cell, cellSize) {
+  if (!cell.revealed || cell.state === 'blocked' || !cell.item) return cellSize;
+  if (modeAnswerIsKanji(cell.mode)) return Math.round(cellSize * 1.8);
+  const len = String(cell.item.display || '').length;
+  if (len > 1) return Math.round(cellSize * Math.min(1 + (len - 1) * 0.92, 3.6));
+  return cellSize;
+}
+
+function renderGrid() {
+  const cellSize = computeCellSize();
+  const baseFontPx = Math.max(8, Math.floor(cellSize * 0.42));
+  const el = document.getElementById('grid');
+  el.innerHTML = '';
+  // Stages that only ever roll one mode (e.g. stage 1's j2e-only pool) never
+  // need the per-cell answer-type tag — every revealed cell obviously wants
+  // the same thing. It's only a stage whose pool mixes modes (kanji mode's
+  // stage 9/10/boss with on'yomi+kun'yomi±j2e/e2j, or compounds' with
+  // j2e/e2j/j2r/r2j) where two cells can show the exact same KIND of face
+  // (e.g. two kanji-faced cells, one wanting a meaning and one wanting a
+  // reading) with no way to tell them apart before selecting — see
+  // answerCategory()/answerTagShort() and the "Answer-type color language"
+  // CSS block.
+  const mixedStage = stageModePool(currentStage, isBossStage).length > 1;
+  for (let row = 0; row < SIZE; row++) {
+    const rowDiv = document.createElement('div');
+    rowDiv.className = 'grid-row';
+    for (let col = 0; col < ROW_LENGTHS[row]; col++) {
+      const cell = grid[row][col];
+      const div = document.createElement('div');
+      div.className = 'cell ' + cell.state;
+      if (row === SIZE - 1) div.classList.add('start-row');
+      if (row === 0) div.classList.add('top-row');
+      if (selected && selected.row === row && selected.col === col) div.classList.add('selected');
+      div.dataset.row = row;
+      div.dataset.col = col;
+      const boxWidth = cellBoxWidthPx(cell, cellSize);
+      const isWideBox = boxWidth !== cellSize;
+      if (isWideBox) div.style.width = boxWidth + 'px'; // height stays the row's normal square size
+      const localBaseFontPx = isWideBox ? Math.max(8, Math.floor(boxWidth * 0.30)) : baseFontPx;
+      if (cell.state === 'blocked') {
+        div.textContent = '✕';
+      } else if (cell.state === 'wrong') {
+        const faceText = cellFaceText(cell);
+        const correctText = primaryFor(cell.item, cell.mode);
+        const correctIsKanji = modeAnswerIsKanji(cell.mode); // e2j/r2j's "correct answer" IS the kanji
+        div.style.fontSize = fitTextFontPx(faceText, localBaseFontPx, 9) + 'px';
+        div.innerHTML = `<span class="cell-face">${esc(faceText)}</span>` +
+          `<span class="wrong-answer${correctIsKanji ? ' kanji' : ''}">${esc(correctText)}</span>`;
+      } else if (cell.state !== 'cleared') {
+        const faceText = cell.revealed ? cellFaceText(cell) : '？';
+        div.style.fontSize = fitTextFontPx(faceText, localBaseFontPx, 9) + 'px';
+        if (cell.revealed && cell.item && mixedStage) {
+          const cat = answerCategory(cell.mode);
+          div.innerHTML = `<span class="cell-face">${esc(faceText)}</span>` +
+            `<span class="ans-tag ans-${cat}">${esc(answerTagShort(cat))}</span>`;
+        } else {
+          div.textContent = faceText;
+        }
+        if (!cell.revealed) div.classList.add('hidden-item');
+      }
+      rowDiv.appendChild(div);
+    }
+    el.appendChild(rowDiv);
+  }
+}
+
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function updateStats() {
+  // Kept deliberately minimal — Alan: "rather than the current top panel
+  // showing the details... something more cool, floating across the
+  // screen before disappearing." The stage name/character and best
+  // time/score now live only in the sweeping stage-brief banner (and the
+  // stage-gate pause card); this bar is just a quiet running readout.
+  document.getElementById('statStage').textContent = stageNameEN(currentStage, isBossStage);
+  document.getElementById('statCleared').textContent = clearedCount + ' cleared';
+  document.getElementById('statWrong').textContent = wrongCount + ' wrong';
+
+  const peekBtn = document.getElementById('btnPeek');
+  if (isBossStage) {
+    peekBtn.style.display = 'inline-block';
+    const hasHidden = grid.some(row => row.some(c => c.state !== 'blocked' && !c.revealed));
+    peekBtn.disabled = !hasHidden || gameOver;
+  } else {
+    peekBtn.style.display = 'none';
+  }
+}
+
+// PEEK — boss-only. Reveals one random currently-hidden space (its kanji
+// becomes visible) WITHOUT selecting/committing to it, unlike a normal tap —
+// a pure hint. Costs 20 points off bestScore, same as a wrong answer (see
+// computeRunScore()), and also lowers the boss's own "kept hidden" tally
+// (bossInfo.score in endGame()) since a peeked cell counts as revealed there
+// too — no separate bookkeeping needed for that side-effect.
+function peekHiddenCell() {
+  if (!isBossStage || gameOver) return;
+  const candidates = [];
+  for (let r = 0; r < SIZE; r++) {
+    grid[r].forEach((cell, c) => {
+      if (cell.state !== 'blocked' && !cell.revealed) candidates.push([r, c]);
+    });
+  }
+  if (!candidates.length) return;
+  const [r, c] = candidates[Math.floor(Math.random() * candidates.length)];
+  grid[r][c].revealed = true;
+  peeksUsed++;
+  renderGrid();
+  updateStats();
+}
+document.getElementById('btnPeek').addEventListener('click', peekHiddenCell);
+
+/*══════════════════════════════════════════════
+  SELECTION & KEYBOARD NAVIGATION
+  The answer bar is always docked at the bottom of the grid — no click-to-
+  open popover. A cell becomes the active selection either by tapping it or
+  via the arrow keys, and the always-focused input answers whichever cell is
+  currently selected.
+══════════════════════════════════════════════*/
+function availableCols(row) {
+  if (row < 0 || row >= SIZE || !grid[row]) return [];
+  const out = [];
+  grid[row].forEach((cell, c) => { if (cell.state === 'available') out.push(c); });
+  return out;
+}
+
+// `focusInput` is true only for a tap/click — a real select needs the
+// virtual keyboard to pop up right away. Keyboard-driven navigation (and
+// auto-advance) deliberately leaves focus alone: G/H/T/U/V/N are also
+// ordinary letters that belong in a typed answer, so the only way to use
+// both is to keep navigation and typing on separate focus states — see the
+// keydown handler below.
+// E→J and Reading→J (compounds) cells are click-only always (there's no
+// kanji on a keyboard to type), regardless of the overall inputMode chosen
+// at setup — see cellForcesClick().
+function cellForcesClick(cell) {
+  return !!(cell && modeAnswerIsKanji(cell.mode));
+}
+
+function selectCell(row, col, focusInput) {
+  if (!grid[row] || !grid[row][col] || grid[row][col].state !== 'available') return;
+  selected = { row, col };
+  const cell = grid[row][col];
+  cell.revealed = true; // selecting a boss-stage space is what reveals it
+  const item = cell.item;
+  const showChoices = inputMode === 'click' || cellForcesClick(cell);
+  document.getElementById('appRoot').classList.toggle('show-choices', showChoices);
+  const barKanjiEl = document.getElementById('barKanji');
+  const faceText = cellFaceText(cell);
+  barKanjiEl.textContent = faceText;
+  barKanjiEl.style.fontSize = fitTextFontPx(faceText, 30, 15) + 'px'; // 30px ≈ the bar's normal 1.9rem
+  const category = answerCategory(cell.mode);
+  document.getElementById('barHint').innerHTML =
+    (isBossStage ? '⚔ One mistake ends the climb — ' : '') +
+    (showChoices ? 'Click the ' : 'Type the ') +
+    `<span class="ans-badge ans-${category}">${esc(modeLabel(cell.mode))}</span>`;
+  const input = document.getElementById('answerInput');
+  input.value = '';
+  document.getElementById('answerFeedback').textContent = '';
+  document.getElementById('answerFeedback').className = 'answer-feedback';
+  renderGrid();
+  if (focusInput && !showChoices) setTimeout(() => input.focus(), 20);
+}
+
+// Called on a fresh grid (new climb / new stage) — picks a bottom-row cell
+// (scanning from the bottom up finds one immediately, since only the start
+// row is available at that point) so the player can start navigating right away.
+function selectFirstAvailable() {
+  for (let r = SIZE - 1; r >= 0; r--) {
+    const cols = availableCols(r);
+    if (cols.length) { selectCell(r, cols[0]); return; }
+  }
+  selected = null;
+  const barKanjiEl = document.getElementById('barKanji');
+  barKanjiEl.textContent = '—';
+  barKanjiEl.style.fontSize = '';
+  document.getElementById('barHint').textContent = 'No space selected';
+}
+
+// Left/right move along the same row's available cells.
+function moveSelection(dir) {
+  if (!selected) { selectFirstAvailable(); return; }
+  const { row, col } = selected;
+  const cols = availableCols(row);
+  const idx = cols.indexOf(col);
+  if (idx === -1) return;
+  const newIdx = dir === 'left' ? idx - 1 : idx + 1;
+  if (newIdx >= 0 && newIdx < cols.length) selectCell(row, cols[newIdx]);
+}
+
+// Diagonal moves — the real adjacency in this diamond grid. Rows are
+// centered and staggered, so there's rarely a cell directly "above" another;
+// what actually exists is one or two up-neighbors (and, symmetrically,
+// down-neighbors) reached via overlappingIndices(). "up-left"/"down-left"
+// picks the leftmost of those, "up-right"/"down-right" the rightmost — the
+// same single neighbor answers either key when there's only one available.
+function moveDiagonal(dir) {
+  if (!selected) { selectFirstAvailable(); return; }
+  const { row, col } = selected;
+  const up = dir === 'up-left' || dir === 'up-right';
+  const neighbors = (up ? upNeighbors(row, col) : downNeighbors(row, col))
+    .filter(([r, c]) => grid[r] && grid[r][c] && grid[r][c].state === 'available');
+  if (!neighbors.length) return;
+  const left = dir === 'up-left' || dir === 'down-left';
+  const pick = left ? neighbors[0] : neighbors[neighbors.length - 1];
+  selectCell(pick[0], pick[1]);
+}
+
+// After a cell is answered (right or wrong) it stops being 'available', so
+// the selection has to move somewhere else automatically. Prefer continuing
+// upward from wherever we just were; otherwise fall back to the closest
+// available cell anywhere on the board.
+function autoAdvanceSelection(fromRow, fromCol) {
+  const upCols = availableCols(fromRow - 1);
+  if (upCols.length) {
+    const myCenter = cellCenter(fromRow, fromCol);
+    let best = upCols[0], bestDist = Infinity;
+    upCols.forEach(c => {
+      const d = Math.abs(cellCenter(fromRow - 1, c) - myCenter);
+      if (d < bestDist) { bestDist = d; best = c; }
+    });
+    selectCell(fromRow - 1, best);
+    return;
+  }
+  let bestCell = null, bestScore = Infinity;
+  const myCenter = cellCenter(fromRow, fromCol);
+  for (let r = 0; r < SIZE; r++) {
+    availableCols(r).forEach((c) => {
+      const score = r * 1000 + Math.abs(cellCenter(r, c) - myCenter);
+      if (score < bestScore) { bestScore = score; bestCell = { row: r, col: c }; }
+    });
+  }
+  if (bestCell) selectCell(bestCell.row, bestCell.col);
+  else selectFirstAvailable(); // no-op if truly nothing is available (game over handles this)
+}
+
+document.getElementById('grid').addEventListener('click', (e) => {
+  const cellEl = e.target.closest('.cell');
+  if (!cellEl || gameOver) return;
+  selectCell(Number(cellEl.dataset.row), Number(cellEl.dataset.col), true);
+});
+
+// G/H/T/U/V/N drive the grid; they only fire while the answer input is NOT
+// focused, since those same letters are ordinary characters in a typed
+// answer (e.g. "night", "vehicle"). Enter (unfocused) hands focus to the
+// input so typing can start; the input's own handler below submits on Enter
+// and blurs back to navigation mode afterward.
+document.addEventListener('keydown', (e) => {
+  if (phase !== 'playing' || gameOver) return;
+  const input = document.getElementById('answerInput');
+  if (document.activeElement === input) return;
+  const key = e.key.toLowerCase();
+  if (key === 'g')      { e.preventDefault(); moveSelection('left'); }
+  else if (key === 'h') { e.preventDefault(); moveSelection('right'); }
+  else if (key === 't') { e.preventDefault(); moveDiagonal('up-left'); }
+  else if (key === 'u') { e.preventDefault(); moveDiagonal('up-right'); }
+  else if (key === 'v') { e.preventDefault(); moveDiagonal('down-left'); }
+  else if (key === 'n') { e.preventDefault(); moveDiagonal('down-right'); }
+  else if (e.key === 'Enter' && inputMode === 'type' && !(selected && cellForcesClick(grid[selected.row][selected.col]))) {
+    e.preventDefault(); input.focus();
+  }
+});
+
+// Returns whether the guess was correct — used directly by both the typed
+// (Enter/Submit) flow and a click-mode answer-box click, so the two input
+// modes always score identically off the same accepted-token comparison.
+function checkAnswer(raw) {
+  if (!selected) return false;
+  const { row, col } = selected;
+  const cell = grid[row][col];
+  const item = cell.item;
+  const guess = String(raw || '').trim().toLowerCase();
+  if (!guess) return false;
+  const accepted = acceptedTokensFor(item, cell.mode) || [];
+  const correct = accepted.includes(guess);
+
+  document.getElementById('answerInput').value = '';
+  const fb = document.getElementById('answerFeedback');
+  if (correct) {
+    fb.textContent = '✓ Correct!';
+    fb.className = 'answer-feedback correct';
+    setTimeout(() => resolveCell(row, col, true), 350);
+  } else {
+    fb.textContent = '✗ Not quite.';
+    fb.className = 'answer-feedback incorrect';
+    setTimeout(() => resolveCell(row, col, false), 500);
+  }
+  return correct;
+}
+
+// Spawns a small burst of gold particles from the center of a cell element.
+// Pure CSS-driven (each particle animates itself via --tx/--ty and removes
+// itself on its own animationend) — no timers to keep in sync with anything.
+function spawnParticles(cellEl) {
+  const COUNT = 9;
+  for (let i = 0; i < COUNT; i++) {
+    const angle = (i / COUNT) * Math.PI * 2 + (Math.random() * 0.5 - 0.25);
+    const dist = 26 + Math.random() * 22;
+    const p = document.createElement('span');
+    p.className = 'particle';
+    p.style.setProperty('--tx', Math.round(Math.cos(angle) * dist) + 'px');
+    p.style.setProperty('--ty', Math.round(Math.sin(angle) * dist) + 'px');
+    cellEl.appendChild(p);
+    p.addEventListener('animationend', () => p.remove());
+  }
+}
+
+function resolveCell(row, col, correct) {
+  const cell = grid[row][col];
+  if (correct) {
+    cell.state = 'cleared';
+    clearedCount++;
+    selected = null; // the cell being answered is about to explode — it can't stay "selected"
+    const cellEl = document.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
+    if (cellEl) {
+      // The answered cell is almost always still wearing the .selected
+      // highlight at this point. .cell.available.selected (3 classes) beats
+      // .cell.exploding (2 classes) on CSS specificity, so leaving it on
+      // would silently keep the blue pulse animation running forever instead
+      // of the explosion — and since that animation never actually ends, the
+      // animationend listener below never fires, so finishClear() (which
+      // unlocks the next spaces) never runs. Strip it before adding the
+      // explosion class so there's no contest.
+      cellEl.classList.remove('selected');
+      cellEl.classList.add('exploding');
+      spawnParticles(cellEl);
+      // Wait for the explosion animation to actually finish before the grid
+      // re-renders (and destroys this element) — a fixed setTimeout here
+      // previously raced the animation and could cut it off mid-burst.
+      const onEnd = (e) => {
+        if (e && e.target !== cellEl) return; // ignore bubbled particle animationend
+        cellEl.removeEventListener('animationend', onEnd);
+        finishClear(row, col);
+      };
+      cellEl.addEventListener('animationend', onEnd);
+    } else {
+      finishClear(row, col);
+    }
+  } else {
+    cell.state = 'wrong';
+    wrongCount++;
+    selected = null;
+    renderGrid();
+    updateStats();
+    // The boss battle has no second chances: one wrong answer ends the whole
+    // climb right here, regardless of what's still reachable elsewhere.
+    if (isBossStage) { endGame(false); return; }
+    checkEndState(row);
+    if (!gameOver) autoAdvanceSelection(row, col);
+  }
+}
+
+// The part of "correct answer" that changes game state, run only once the
+// explosion animation has actually finished playing.
+function finishClear(row, col) {
+  unlockNeighbors(row, col);
+  selected = null;
+  renderGrid();
+  updateStats();
+  checkEndState(row);
+  if (!gameOver) autoAdvanceSelection(row, col);
+}
+
+// Only up/left/right — never down, per the game's core rule. "Up" can mean
+// ONE or TWO cells in the row above, since rows can differ in length by more
+// than a simple 1-to-1 mapping (see overlappingIndices()).
+function unlockNeighbors(row, col) {
+  const candidates = [...upNeighbors(row, col), ...sameRowNeighbors(row, col)];
+  candidates.forEach(([r, c]) => {
+    if (grid[r][c].state === 'locked') grid[r][c].state = 'available';
+  });
+}
+
+// Is winning still even theoretically possible from here? BFS from every
+// currently available/cleared cell, moving only through non-'wrong',
+// non-'blocked' cells via the exact same up/same-row edges the real game
+// ever unlocks (never down). If row 0 isn't reachable that way, no sequence
+// of future correct answers can ever get there either — game over, even if
+// some available cells remain elsewhere in a dead-end pocket.
+function isTopReachable() {
+  const visited = ROW_LENGTHS.map(len => new Array(len).fill(false));
+  const stack = [];
+  for (let r = 0; r < SIZE; r++) {
+    for (let c = 0; c < ROW_LENGTHS[r]; c++) {
+      const st = grid[r][c].state;
+      if ((st === 'available' || st === 'cleared') && !visited[r][c]) {
+        visited[r][c] = true;
+        stack.push([r, c]);
+      }
+    }
+  }
+  while (stack.length) {
+    const [r, c] = stack.pop();
+    if (r === 0) return true;
+    const neighbors = [...upNeighbors(r, c), ...sameRowNeighbors(r, c)];
+    for (const [nr, nc] of neighbors) {
+      if (visited[nr][nc]) continue;
+      if (grid[nr][nc].state === 'wrong' || grid[nr][nc].state === 'blocked') continue;
+      visited[nr][nc] = true;
+      stack.push([nr, nc]);
+    }
+  }
+  return false;
+}
+
+function checkEndState(lastRow) {
+  if (lastRow === 0 && grid[0].some(c => c.state === 'cleared')) {
+    onStageWin();
+    return;
+  }
+  if (!isTopReachable()) endGame(false);
+}
+
+// Clearing the top row wins the STAGE, not necessarily the whole climb —
+// stages 1-9 immediately deal the next stage (same size, a fresh random
+// selection, one more blocked cell than before); stage 10 wins the climb.
+function onStageWin() {
+  if (isBossStage) { endGame(true); return; } // the boss is beaten — the whole climb is won
+  stageTimes.push({ stage: currentStage, ms: Date.now() - stageStartTime });
+  gameOver = true; // block input until the player deliberately continues (see the stage gate below)
+  if (currentStage >= MAX_STAGE) {
+    recordStagesResult(); // stages 1-10 are done — check/update the per-level record
+    showStageToast(`Stage ${currentStage} clear! → ⚔ BOSS BATTLE`);
+    isBossStage = true;
+  } else {
+    showStageToast(`Stage ${currentStage} clear! → Stage ${currentStage + 1}`);
+    currentStage++;
+  }
+  // Alan: "let's not start each stage immediately, give the player a chance
+  // to break/pause between stages" — so instead of auto-continuing on a
+  // fixed timer, let the toast animation read for a moment, then open the
+  // stage gate and WAIT for an explicit "Start" click (see openStageGate()).
+  setTimeout(openStageGate, 900);
+}
+
+// Called the moment stages 1-10 are cleared (about to enter the boss) — the
+// only point "levels 1-10" can be said to be done, so the only point this
+// record is eligible to update. Ranked on fewest wrong answers: the random
+// grid shape means the total cells (and so the max possible correct count)
+// varies run to run, but "wrong answers" is comparable across any shape.
+function recordStagesResult() {
+  stagesRecordBeaten = false;
+  stagesCheckpointWrong = wrongCount;
+  if (recordLevel == null) return;
+  const prev = getLevelRecord(recordLevel);
+  const isNewBest = !prev || prev.stagesBestWrong == null || wrongCount < prev.stagesBestWrong;
+  if (isNewBest) {
+    updateLevelRecord(recordLevel, { stagesBestWrong: wrongCount, stagesBestCorrect: clearedCount });
+    stagesRecordBeaten = true;
+  }
+}
+
+function showStageToast(text) {
+  const t = document.getElementById('stageToast');
+  t.textContent = text;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 1000);
+}
+
+// Item 7 (and Alan's follow-up refinements): what a given stage/the boss
+// asks for, plus whatever personal bests already exist for it — this
+// stage's own fastest clear time, plus the level's overall best score
+// (there's no separate per-stage score, only a whole-climb one — see
+// computeRunScore()). Shared by the floating intro banner, the persistent
+// header readout, and the stage gate, so all three always agree.
+function stageRecordSummary(stage, isBoss) {
+  const key = isBoss ? 'boss' : String(stage);
+  const rec = recordLevel != null ? getLevelRecord(recordLevel) : null;
+  const bestMs = rec && rec.stageBestTimesMs ? rec.stageBestTimesMs[key] : null;
+  const timeText = bestMs != null ? formatTime(bestMs) : '—';
+  const timeLine = bestMs != null
+    ? `🏆 Best time here: ${timeText}`
+    : 'No best time recorded yet for this stage';
+  const scoreText = recordLevel == null ? '—' : (rec && rec.bestScore != null ? String(rec.bestScore) : '—');
+  const scoreLine = recordLevel == null
+    ? "Records aren't kept for this WK level range"
+    : (rec && rec.bestScore != null ? `⭐ Level's best score: ${scoreText}` : 'No best score recorded yet for this level');
+  return { timeText, timeLine, scoreText, scoreLine };
+}
+
+// The floating "title card" — the stage's historical figure (JP ordinal +
+// name + role) + task + personal bests — that sweeps in from off-screen,
+// holds center stage, then sweeps back out at the start of every
+// stage/the boss (item 7; Alan: "something more cool... floating across
+// the screen before disappearing that shows the stage name and previous
+// records").
+let stageBriefTimer = null;
+let stageBriefExitTimer = null;
+function showStageBriefing() {
+  const el = document.getElementById('stageBrief');
+  if (!el) return;
+  const theme = stageTheme(currentStage, isBossStage);
+  const nameLine = (theme.emoji ? theme.emoji + ' ' : '') + (theme.name || stageNameEN(currentStage, isBossStage));
+  const summary = stageModeSummary(currentStage, isBossStage);
+  const { timeLine, scoreLine } = stageRecordSummary(currentStage, isBossStage);
+  el.innerHTML = `<div class="stage-brief-jp">${esc(stageNameJP(currentStage, isBossStage))}</div>` +
+    `<div class="stage-brief-name">${esc(nameLine)}</div>` +
+    (theme.role ? `<div class="stage-brief-role">${esc(theme.role)}</div>` : '') +
+    `<div class="stage-brief-task">${esc(summary)}</div>` +
+    `<div class="stage-brief-line">${esc(timeLine)}</div>` +
+    `<div class="stage-brief-line">${esc(scoreLine)}</div>`;
+  clearTimeout(stageBriefTimer);
+  clearTimeout(stageBriefExitTimer);
+  el.classList.remove('leaving');
+  el.classList.add('show');
+  stageBriefTimer = setTimeout(() => dismissStageBriefing(), 3600);
+}
+function dismissStageBriefing() {
+  const el = document.getElementById('stageBrief');
+  if (!el || !el.classList.contains('show')) return;
+  el.classList.remove('show');
+  el.classList.add('leaving');
+  clearTimeout(stageBriefExitTimer);
+  stageBriefExitTimer = setTimeout(() => el.classList.remove('leaving'), 520);
+}
+document.getElementById('stageBrief').addEventListener('click', () => {
+  clearTimeout(stageBriefTimer);
+  dismissStageBriefing();
+});
+
+// The stage gate — a deliberate pause between stages (Alan: "let's not
+// start each stage immediately, give the player a chance to break/pause").
+// Shows the same info as the floating banner but waits for an explicit
+// click rather than auto-continuing on a fixed timer.
+function openStageGate() {
+  const theme = stageTheme(currentStage, isBossStage);
+  document.getElementById('gateJP').textContent = stageNameJP(currentStage, isBossStage);
+  document.getElementById('gateTitle').textContent = stageThemeName(currentStage, isBossStage);
+  document.getElementById('gateTask').textContent = stageModeSummary(currentStage, isBossStage);
+  const { timeLine, scoreLine } = stageRecordSummary(currentStage, isBossStage);
+  document.getElementById('gateBest').innerHTML = `${esc(timeLine)}<br>${esc(scoreLine)}`;
+  document.getElementById('btnGateStart').textContent =
+    '▶ Face ' + (theme.name || (isBossStage ? 'Boss Battle' : 'Stage ' + currentStage));
+  document.getElementById('stageGate').classList.add('open');
+}
+function closeStageGateAndStart() {
+  document.getElementById('stageGate').classList.remove('open');
+  newGrid();
+}
+document.getElementById('btnGateStart').addEventListener('click', closeStageGateAndStart);
+
+function endGame(won) {
+  gameOver = true;
+  clearInterval(timerInterval);
+  // The segment in progress when the climb ends — a losing stage, or the
+  // boss battle either way — never passed through onStageWin()'s
+  // bookkeeping. Record its elapsed time here so the total always covers
+  // every segment actually played, whichever way the climb ended.
+  stageTimes.push({ stage: isBossStage ? 'boss' : currentStage, ms: Date.now() - stageStartTime });
+  const totalMs = stageTimes.reduce((sum, s) => sum + s.ms, 0);
+
+  // The boss's "kept hidden" score: how many of its open cells never had to
+  // be revealed. Only meaningful for a boss run — a normal loss has no
+  // hidden cells to speak of.
+  let bossInfo = null;
+  if (isBossStage) {
+    const totalOpen = grid.flat().filter(c => c.state !== 'blocked').length;
+    const revealedCount = grid.flat().filter(c => c.state !== 'blocked' && c.revealed).length;
+    bossInfo = { score: totalOpen - revealedCount, revealed: revealedCount, total: totalOpen };
+  }
+
+  // Records only ever update for a climb locked to something recordable
+  // (recordLevel != null — see getRecordLevel()). bestScore updates on
+  // EVERY such run, win or lose ("or as far as they got"); bestTimeMs and
+  // the boss tally only ever update on an actual full win.
+  let levelRecord = recordLevel != null ? getLevelRecord(recordLevel) : null;
+  let newTimeRecord = false, newBossRecord = false, newScoreRecord = false;
+
+  const runScore = computeRunScore(totalMs, wrongCount, peeksUsed);
+  if (recordLevel != null) {
+    newScoreRecord = !levelRecord || levelRecord.bestScore == null || runScore > levelRecord.bestScore;
+    if (newScoreRecord) levelRecord = updateLevelRecord(recordLevel, { bestScore: runScore });
+  }
+
+  if (recordLevel != null && won && isBossStage) {
+    const prev = levelRecord;
+    newBossRecord = !prev || prev.bossBestScore == null || bossInfo.score > prev.bossBestScore;
+    newTimeRecord = !prev || prev.bestTimeMs == null || totalMs < prev.bestTimeMs;
+    const patch = {};
+    if (newBossRecord) Object.assign(patch, { bossBestScore: bossInfo.score, bossBestRevealed: bossInfo.revealed, bossBestTotal: bossInfo.total });
+    if (newTimeRecord) patch.bestTimeMs = totalMs;
+    if (Object.keys(patch).length) levelRecord = updateLevelRecord(recordLevel, patch);
+  }
+
+  // Per-stage fastest-clear times. Every stageTimes entry except possibly the
+  // last is already a genuine clear (pushed by onStageWin()); the last entry
+  // is only a clear too when this run actually WON (the boss, necessarily —
+  // see onStageWin()) — otherwise it's the failed final attempt and must be
+  // excluded so a loss can never plant a bogus "fastest clear" for a stage
+  // that was never actually cleared.
+  if (recordLevel != null) {
+    const clearedEntries = won ? stageTimes : stageTimes.slice(0, -1);
+    if (clearedEntries.length) {
+      const times = Object.assign({}, (levelRecord && levelRecord.stageBestTimesMs) || {});
+      let changed = false;
+      clearedEntries.forEach(({ stage, ms }) => {
+        const key = String(stage);
+        if (times[key] == null || ms < times[key]) { times[key] = ms; changed = true; }
+      });
+      if (changed) levelRecord = updateLevelRecord(recordLevel, { stageBestTimesMs: times });
+    }
+  }
+
+  const banner = document.getElementById('endBanner');
+  document.getElementById('endEmoji').textContent = won ? '🏔️' : (isBossStage ? '⚔️' : '💥');
+  const title = document.getElementById('endTitle');
+  title.textContent = won
+    ? (isBossStage ? 'Boss battle conquered!' : 'You conquered the climb!')
+    : (isBossStage ? 'The boss battle got you' : 'No way forward');
+  title.className = 'end-title ' + (won ? 'win' : 'lose');
+  document.getElementById('endSub').textContent = won
+    ? `All ${MAX_STAGE} stages plus the boss battle cleared — ${clearedCount} cleared, ${wrongCount} wrong overall.`
+    : (isBossStage
+        ? `One wrong answer in the boss battle ends the run — ${clearedCount} cleared, ${wrongCount} wrong overall.`
+        : `Stopped at stage ${currentStage} of ${MAX_STAGE} — ${clearedCount} cleared, ${wrongCount} wrong overall.`);
+  document.getElementById('endStats').innerHTML =
+    buildEndStatsHtml(totalMs, bossInfo, levelRecord, newTimeRecord, newBossRecord, runScore, newScoreRecord);
+  banner.classList.add('open');
+  renderAnswerChoices(); // freeze the click-mode panel (gameOver now disables every box)
+}
+
+// Alan's spec: elapsed time in whole seconds minus 20 points per wrong
+// answer and per boss Peek used. Applies to the WHOLE run regardless of how
+// far it got or how it ended — a partial climb scores on exactly the same
+// scale as a full one, just with less time on the clock (and, ideally,
+// fewer deductions) to show for it. Higher is better; can go negative.
+function computeRunScore(totalMs, wrong, peeks) {
+  return Math.round(totalMs / 1000) - 20 * (wrong + peeks);
+}
+
+// Small stats block shown at the bottom of the end banner: the unified score
+// (always, when tracked), elapsed time, the boss's kept-hidden tally (only
+// when the boss was reached), the stages-1-10 wrong-answer snapshot (only
+// when stages 1-10 were cleared this run), and a 🏆 badge wherever this run
+// actually beat what was stored — otherwise the current best is shown
+// alongside for comparison.
+function buildEndStatsHtml(totalMs, bossInfo, levelRecord, newTimeRecord, newBossRecord, runScore, newScoreRecord) {
+  const lines = [];
+  if (recordLevel != null) {
+    lines.push(`⭐ Score: ${runScore} <span class="end-stats-note" style="display:inline;font-style:normal;">(seconds − 20×mistakes)</span>` +
+      recordBadge(newScoreRecord, levelRecord && levelRecord.bestScore != null ? `best ${levelRecord.bestScore}` : null));
+  }
+  lines.push(`⏱ Time: ${formatTime(totalMs)}` +
+    recordBadge(newTimeRecord, levelRecord && levelRecord.bestTimeMs != null ? `best ${formatTime(levelRecord.bestTimeMs)}` : null));
+
+  if (bossInfo) {
+    lines.push(`👁 Boss: revealed ${bossInfo.revealed}/${bossInfo.total} (score ${bossInfo.score})` +
+      recordBadge(newBossRecord, levelRecord && levelRecord.bossBestScore != null ? `best ${levelRecord.bossBestScore}` : null));
+  }
+
+  if (stagesCheckpointWrong != null) {
+    lines.push(`📊 Stages 1–${MAX_STAGE}: ${stagesCheckpointWrong} wrong` +
+      recordBadge(stagesRecordBeaten, levelRecord && levelRecord.stagesBestWrong != null ? `best ${levelRecord.stagesBestWrong} wrong` : null));
+  }
+
+  if (recordLevel == null) {
+    lines.push(`<span class="end-stats-note">Records aren't kept for a WK level range (or a blank level) — pick a specific level, No WK Level, or Master to start one.</span>`);
+  }
+  return lines.map(l => `<div class="end-stats-row">${l}</div>`).join('');
+}
+
+function recordBadge(isNew, bestText) {
+  if (isNew) return ' <span class="record-badge">🏆 New record!</span>';
+  if (bestText) return ` <span class="end-stats-best">(${bestText})</span>`;
+  return '';
+}
+
+/*══════════════════════════════════════════════
+  SETUP SCREEN  (level selection — locked once Start Climb is pressed)
+══════════════════════════════════════════════*/
+// Each stage's answer setup is now fixed (see KANJI_STAGE_MODE_POOLS/
+// COMPOUND_STAGE_MODE_POOLS) rather than chosen at setup. The full
+// stage-by-stage plan used to be listed here on
+// the setup screen, but it didn't display well in the setup card — the
+// per-stage briefing banner (showStageBriefing(), shown when each stage
+// actually begins) covers the same information at the point it's useful.
+
+// Item 8: which sheet/item family this climb draws from — 漢字 (single
+// kanji, the original mode) or 熟語 (compound words/phrases). Toggling this
+// live-updates `gameMode`, same pattern as inputMode/levelMode below: it's
+// only ever really "chosen" in the sense of whatever it's set to when
+// Start Climb is pressed. Switching to Compounds for the first time kicks
+// off its (much bigger) data load lazily — see ensureCompoundsDataLoading().
+document.getElementById('setupModeTabs').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-mode]');
+  if (!btn) return;
+  gameMode = btn.dataset.mode;
+  document.querySelectorAll('#setupModeTabs button').forEach(b => b.classList.toggle('active', b === btn));
+  updateSetupModeUI();
+  if (gameMode === 'compounds') ensureCompoundsDataLoading();
+});
+
+// Compounds-only: picking one specific category narrows the pool AND (per
+// getRecordLevel()) makes the climb untracked — see the hint text in the
+// HTML. No listener needed beyond letting pickPool()/getRecordLevel() read
+// it live via getCategoryFilter(); this just keeps the hint accurate.
+document.getElementById('categoryFilter').addEventListener('change', updateCompoundsSetupUI);
+
+document.getElementById('setupSegLevel').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-levelmode]');
+  if (!btn) return;
+  levelMode = btn.dataset.levelmode;
+  document.querySelectorAll('#setupSegLevel button').forEach(b => b.classList.toggle('active', b === btn));
+  updateLevelModeUI();
+});
+
+// Keeps the specific-level/range sub-fields and the explanatory hint in sync
+// with whichever of the 4 level modes is currently selected.
+function updateLevelModeUI() {
+  document.getElementById('wkSingleGroup').style.display = levelMode === 'specific' ? 'flex' : 'none';
+  document.getElementById('wkRangeGroup').style.display = levelMode === 'range' ? 'flex' : 'none';
+  const hint = document.getElementById('wkModeHint');
+  if (levelMode === 'specific') {
+    hint.textContent = 'Leave blank to draw from every kanji on the sheet (won\'t be recorded then). A filled-in level tracks a best score, best time, and (for the boss battle) a fewest-reveals record.';
+  } else if (levelMode === 'none') {
+    hint.textContent = 'Kanji with no WaniKani level assigned at all. Tracks its own best score, best time, and fewest-reveals record, same as a specific level.';
+  } else if (levelMode === 'master') {
+    hint.textContent = 'Every kanji on the sheet, regardless of level. Tracks its own best score, best time, and fewest-reveals record, same as a specific level.';
+  } else {
+    hint.textContent = 'Recorded against the lowest level in your range (leave both blank for a fully unrestricted, untracked climb).';
+  }
+}
+updateLevelModeUI();
+
+// Compounds-only: the Category <select>'s options are populated straight
+// off the loaded data (44 distinct values on the sheet at last count) once
+// it actually arrives, rather than a hardcoded list that could drift out of
+// sync with the sheet — see applyCompoundRows().
+function populateCategoryFilter() {
+  const sel = document.getElementById('categoryFilter');
+  if (!sel) return;
+  const prev = sel.value;
+  const categories = [...new Set(COMPOUNDS_ALL.map(k => k.category).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  sel.innerHTML = '<option value="all">All categories</option>' +
+    categories.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+  if (categories.includes(prev)) sel.value = prev;
+}
+
+// Swaps the setup card's explanatory blurb and Category group in/out
+// between the two climbs, and defers to updateCompoundsSetupUI() for the
+// load-state-dependent bits (loading hint, Start button).
+function updateSetupModeUI() {
+  const isCompounds = gameMode === 'compounds';
+  document.getElementById('categoryGroup').style.display = isCompounds ? 'block' : 'none';
+  document.getElementById('setupExplainer').textContent = isCompounds
+    ? "10 stages per climb through compound words and phrases instead of single kanji — same board, same rules, but stage 7 asks for a compound's READING and stage 9 asks for the compound itself given its reading, taking the place of kanji mode's on'yomi/kun'yomi stages. Each level's shape is randomized fresh — 2 to 5 starting spaces at the bottom, widening or narrowing by one space each row up, always 10 rows tall, with a few blocked spaces (✕) added each stage after the first. Move between open spaces with G/H/T/U/V/N or by tapping/clicking them directly, then tap/click your answer. Beat stage 10 for one final ⚔ boss battle."
+    : "10 stages per climb. Each level's shape is randomized fresh — 2 to 5 starting spaces at the bottom, widening or narrowing by one space each row up, always 10 rows tall. Each stage after the first also blocks off a few more random spaces (✕) — always leaving at least one route to the top. Once the climb starts, move between open spaces with G/H/T/U/V/N (a key legend shows on the left) or by tapping/clicking them directly, then tap/click your answer from the panel on the right. Beat stage 10 and the board resets clean for one final ⚔ boss battle — every space but the bottom row is hidden until you select it, and a single wrong answer ends the run.";
+  updateCompoundsSetupUI();
+}
+
+// Gates the Start Climb button on the (lazy, much bigger) compounds sheet
+// actually being ready when that's the active tab — kanji mode's data is
+// loaded up front at page load so it never needs this.
+function updateCompoundsSetupUI() {
+  const hint = document.getElementById('compoundsLoadHint');
+  const startBtn = document.getElementById('btnStartGame');
+  if (gameMode !== 'compounds') {
+    hint.style.display = 'none';
+    startBtn.disabled = false;
+    startBtn.textContent = '▶ Start Climb';
+    return;
+  }
+  if (compoundsLoadState === 'ready') {
+    hint.style.display = 'none';
+    startBtn.disabled = false;
+    startBtn.textContent = '▶ Start Climb';
+  } else if (compoundsLoadState === 'error') {
+    hint.style.display = 'block';
+    hint.innerHTML = '<span style="color:#e05252">⚠ Could not load the compounds sheet — check your connection.</span>';
+    startBtn.disabled = true;
+    startBtn.textContent = '▶ Start Climb';
+  } else {
+    hint.style.display = 'block';
+    hint.textContent = 'Loading compounds… (a bigger sheet than kanji mode — only fetched once, the first time you visit this tab)';
+    startBtn.disabled = true;
+    startBtn.textContent = '⏳ Loading compounds…';
+  }
+}
+updateSetupModeUI();
+
+function startGame() {
+  if (gameMode === 'compounds' && compoundsLoadState !== 'ready') return; // Start is disabled in this state too — belt and suspenders
+  currentStage = 1;
+  isBossStage = false;
+  clearedCount = 0;
+  wrongCount = 0;
+  phase = 'playing';
+  recordLevel = getRecordLevel();
+  stageTimes = [];
+  stagesRecordBeaten = false;
+  stagesCheckpointWrong = null;
+  peeksUsed = 0;
+  document.getElementById('appRoot').classList.remove('show-choices'); // selectCell() sets this fresh per cell
+  document.getElementById('setupPanel').style.display = 'none';
+  document.getElementById('appRoot').style.display = 'flex';
+  clearInterval(timerInterval);
+  timerInterval = setInterval(updateTimerDisplay, 250);
+  newGrid();
+}
+
+// Returning to setup (mid-game "New Game", or from the end banner) always
+// re-opens the level picker — answer mode, input mode and WK level/range are
+// only ever chosen there, which is what keeps them locked for the duration
+// of a climb.
+function returnToSetup() {
+  clearInterval(timerInterval);
+  document.getElementById('endBanner').classList.remove('open');
+  document.getElementById('stageGate').classList.remove('open'); // in case "New Game" is hit mid-pause
+  document.getElementById('appRoot').style.display = 'none';
+  document.getElementById('setupPanel').style.display = 'flex';
+  phase = 'setup';
+}
+
+document.getElementById('btnStartGame').addEventListener('click', startGame);
+document.getElementById('btnNewGame').addEventListener('click', returnToSetup);
+document.getElementById('btnEndNewGame').addEventListener('click', returnToSetup);
+document.getElementById('btnAnswerSubmit').addEventListener('click', () => {
+  const input = document.getElementById('answerInput');
+  checkAnswer(input.value);
+  input.blur();
+});
+document.getElementById('answerInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    checkAnswer(e.target.value);
+    e.target.blur(); // back to navigation mode — G/H/T/U/V/N work immediately again
+  }
+  if (e.key === 'Escape') { e.target.value = ''; e.target.blur(); }
+});
+
+let resizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => { if (ROW_LENGTHS.length) renderGrid(); }, 150);
+});
+
+loadData();
+
+// PWA: registers the service worker so this can be added to a phone's home
+// screen and still open with no connection at all (see sw.js).
+if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
+</script>
+</body>
+</html>
