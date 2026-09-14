@@ -1886,9 +1886,16 @@ function computeCellSize() {
   // a little. I'd rather the kanji / words are large and clear." So the
   // grid is free to run taller than the viewport at any width, and
   // .game-wrap scrolls to it instead of squashing cells down to fit every
-  // row (see the CSS), while selectCell()'s scrollIntoView keeps the
-  // current selection reachable as you climb.
-  let size = sizeByWidth;
+  // row (see the CSS and the scroll-pad arrows/scrollGameWrap()).
+  //
+  // WIDTH_FILL_RATIO: cells filling the full available width edge-to-edge
+  // came out "a little too large" (Alan) once every row could size purely
+  // by width — this leaves a bit of breathing room on every row instead of
+  // always maxing it out, while staying proportional (a wider screen still
+  // gets bigger cells than a narrow one; nothing here brings back the old
+  // shrink-to-fit-all-10-rows behavior).
+  const WIDTH_FILL_RATIO = 0.82;
+  let size = Math.floor(sizeByWidth * WIDTH_FILL_RATIO);
   if (!Number.isFinite(size) || size <= 0) size = 40;
   size = Math.max(14, Math.min(size, 140));
   gridEl.style.setProperty('--cell-size', size + 'px');
