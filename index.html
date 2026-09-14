@@ -1876,11 +1876,46 @@ function cellBoxWidthPx(cell, cellSize) {
   return cellSize;
 }
 
+// computeCellSize() sizes every cell in the widest (peak) row to exactly
+// fill the available width, so that row has zero horizontal slack left —
+// but a wide box (see cellBoxWidthPx() above) can still land in ANY row,
+// including the peak one, and .game-wrap has no horizontal scroll (a
+// pyramid row is meant to always fit; Alan found wide cells pushed off the
+// left/right edge with no way to reach them: "I'm unable to move left and
+// right"). This scales each row's wide boxes down just enough — using
+// natural width UP TO whatever slack that specific row actually has versus
+// the peak row — so the whole row always fits, falling back to the plain
+// square (relying on fitTextFontPx's font shrink) only when a row has no
+// slack at all.
+function rowBoxWidths(rowCells, cellSize, gap, availW) {
+  const rowLen = rowCells.length;
+  const naturalWidths = rowCells.map(cell => cellBoxWidthPx(cell, cellSize));
+  if (!Number.isFinite(availW) || availW <= 0 || rowLen === 0) return naturalWidths;
+  const baseRowWidth = rowLen * cellSize + (rowLen - 1) * gap;
+  const naturalRowWidth = naturalWidths.reduce((a, b) => a + b, 0) + (rowLen - 1) * gap;
+  if (naturalRowWidth <= availW) return naturalWidths;
+  const extraNeeded = naturalRowWidth - baseRowWidth;
+  const extraAvailable = Math.max(0, availW - baseRowWidth);
+  const scale = extraNeeded > 0 ? extraAvailable / extraNeeded : 1;
+  // Math.floor, not Math.round, on the scaled width: rounding each of
+  // several wide cells UP independently can accumulate a few px past
+  // availW even though the scale factor itself was computed exactly right
+  // — flooring guarantees the row can only ever end up at or under budget.
+  return naturalWidths.map(w => (w > cellSize ? Math.floor(cellSize + (w - cellSize) * scale) : w));
+}
+
 function renderGrid() {
   const cellSize = computeCellSize();
   const baseFontPx = Math.max(8, Math.floor(cellSize * 0.42));
   const el = document.getElementById('grid');
   el.innerHTML = '';
+  // Same width math as computeCellSize() (gap/pad kept in sync with it) —
+  // needed here too so rowBoxWidths() knows how much slack (if any) each
+  // row actually has for widened cells. See rowBoxWidths() above.
+  const gap = 8;
+  const pad = 36;
+  const wrapEl = el.parentElement;
+  const availW = (wrapEl && typeof wrapEl.clientWidth === 'number' && wrapEl.clientWidth > 0) ? wrapEl.clientWidth - pad : NaN;
   // Stages that only ever roll one mode (e.g. stage 1's j2e-only pool) never
   // need the per-cell answer-type tag — every revealed cell obviously wants
   // the same thing. It's only a stage whose pool mixes modes (kanji mode's
@@ -1894,6 +1929,8 @@ function renderGrid() {
   for (let row = 0; row < SIZE; row++) {
     const rowDiv = document.createElement('div');
     rowDiv.className = 'grid-row';
+    const rowCells = grid[row].slice(0, ROW_LENGTHS[row]);
+    const boxWidths = rowBoxWidths(rowCells, cellSize, gap, availW);
     for (let col = 0; col < ROW_LENGTHS[row]; col++) {
       const cell = grid[row][col];
       const div = document.createElement('div');
@@ -1903,7 +1940,7 @@ function renderGrid() {
       if (selected && selected.row === row && selected.col === col) div.classList.add('selected');
       div.dataset.row = row;
       div.dataset.col = col;
-      const boxWidth = cellBoxWidthPx(cell, cellSize);
+      const boxWidth = boxWidths[col];
       const isWideBox = boxWidth !== cellSize;
       if (isWideBox) div.style.width = boxWidth + 'px'; // height stays the row's normal square size
       const localBaseFontPx = isWideBox ? Math.max(8, Math.floor(boxWidth * 0.30)) : baseFontPx;
