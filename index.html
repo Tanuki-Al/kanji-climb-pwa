@@ -1974,13 +1974,26 @@ function renderGrid() {
   const cellSize = computeCellSize();
   const baseFontPx = Math.max(8, Math.floor(cellSize * 0.42));
   const el = document.getElementById('grid');
+  const wrapEl = el.parentElement;
+  // Capture .game-wrap's scroll position BEFORE clearing #grid below.
+  // el.innerHTML='' briefly collapses #grid to nothing inside .game-wrap
+  // (a scrolling container), and the wrapEl.clientWidth read a few lines
+  // down — needed for rowBoxWidths() — forces the browser to lay out
+  // RIGHT THEN, while the grid is momentarily empty, which clamps
+  // .game-wrap's scroll position back to 0 on the spot. Restoring it once
+  // the grid is fully rebuilt (see the end of this function) is what
+  // actually stops the view jumping/recentring on every click (Alan:
+  // "when I click a cell it still moves it up to the centre of the
+  // page") — this reflow-driven reset was happening independently of (and
+  // survived removing) the old explicit scrollIntoView() call.
+  const savedScrollTop = (wrapEl && typeof wrapEl.scrollTop === 'number') ? wrapEl.scrollTop : null;
+  const savedScrollLeft = (wrapEl && typeof wrapEl.scrollLeft === 'number') ? wrapEl.scrollLeft : null;
   el.innerHTML = '';
   // Same width math as computeCellSize() (gap/pad kept in sync with it) —
   // needed here too so rowBoxWidths() knows how much slack (if any) each
   // row actually has for widened cells. See rowBoxWidths() above.
   const gap = 8;
   const pad = 36;
-  const wrapEl = el.parentElement;
   const availW = (wrapEl && typeof wrapEl.clientWidth === 'number' && wrapEl.clientWidth > 0) ? wrapEl.clientWidth - pad : NaN;
   // Stages that only ever roll one mode (e.g. stage 1's j2e-only pool) never
   // need the per-cell answer-type tag — every revealed cell obviously wants
@@ -2034,6 +2047,15 @@ function renderGrid() {
       rowDiv.appendChild(div);
     }
     el.appendChild(rowDiv);
+  }
+  // Restore the scroll position captured before the clear/rebuild above —
+  // #grid is back to its full size now, so this is a plain, immediate
+  // restore, not a scroll animation (Alan wants the view to move only
+  // when he moves it: the scroll-pad arrows, a trackpad swipe, or the
+  // scrollbar — never on its own from selecting/re-rendering a cell).
+  if (wrapEl) {
+    if (savedScrollTop !== null) wrapEl.scrollTop = savedScrollTop;
+    if (savedScrollLeft !== null) wrapEl.scrollLeft = savedScrollLeft;
   }
 }
 
