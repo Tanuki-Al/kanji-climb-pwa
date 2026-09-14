@@ -204,17 +204,20 @@ input, select { font-family: inherit; }
 .stage-brief-task { color: var(--muted); font-size: .78rem; margin-bottom: 6px; }
 .stage-brief-line { color: var(--muted2); font-size: .76rem; margin-top: 2px; }
 
-/* ── Keyboard-shortcut legend ── */
+/* ── Keyboard-shortcut legend ──
+   Used to float over the live game screen (position:fixed on the left) —
+   Alan: "let's remove the key info from the screen - maybe put it on the
+   setup page instead." Now it's just a normal block of setup-screen
+   content (see #keyHelp inside .setup-panel), so no more fixed
+   positioning or a phone-only display:none — it reads once, before the
+   climb starts, alongside the rest of the setup explainer. */
 .key-help {
-  position: fixed; left: 14px; top: 50%; transform: translateY(-50%);
   background: rgba(20,20,40,.88);
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 12px 12px;
   font-size: .68rem;
   color: var(--muted);
-  z-index: 60;
-  backdrop-filter: blur(2px);
 }
 .key-help-title { font-size: .68rem; font-weight: 700; color: var(--gold); margin-bottom: 8px; letter-spacing: .04em; text-transform: uppercase; }
 .key-help-row { display: flex; align-items: center; gap: 5px; margin-bottom: 6px; white-space: nowrap; }
@@ -226,9 +229,6 @@ input, select { font-family: inherit; }
   min-width: 18px; height: 18px; padding: 0 4px;
   background: var(--bg3); border: 1px solid var(--border); border-bottom-width: 2px;
   border-radius: 4px; font-family: inherit; font-weight: 700; font-size: .68rem; color: var(--text);
-}
-@media (max-width: 820px) {
-  .key-help { display: none; } /* touch devices navigate by tapping instead */
 }
 
 /* ── Game area ── */
@@ -670,11 +670,18 @@ input, select { font-family: inherit; }
       row up, always 10 rows tall. Each stage after the first also blocks off
       a few more random spaces (✕) — always leaving at least one route to the
       top. Once the climb starts, move between open spaces with G/H/T/U/V/N
-      (a key legend shows on the left) or by tapping/clicking them directly,
-      then tap/click your answer from the panel on the right. Beat stage 10
-      and the board resets clean for one final ⚔ boss battle — every space
-      but the bottom row is hidden until you select it, and a single wrong
+      (see the key legend below) or by tapping/clicking them directly, then
+      tap/click your answer from the panel on the right. Beat stage 10 and
+      the board resets clean for one final ⚔ boss battle — every space but
+      the bottom row is hidden until you select it, and a single wrong
       answer ends the run.
+    </div>
+
+    <div class="key-help" id="keyHelp" style="margin-bottom:14px;">
+      <div class="key-help-title">Move</div>
+      <div class="key-help-row"><kbd>T</kbd><kbd>U</kbd><span>Up-left / Up-right</span></div>
+      <div class="key-help-row"><kbd>G</kbd><kbd>H</kbd><span>Left / Right</span></div>
+      <div class="key-help-row"><kbd>V</kbd><kbd>N</kbd><span>Down-left / Down-right</span></div>
     </div>
 
     <button class="btn-start" id="btnStartGame">▶ Start Climb</button>
@@ -682,12 +689,6 @@ input, select { font-family: inherit; }
 </div>
 
 <div id="appRoot" style="display:none; flex-direction:column; flex:1; min-height:0;">
-  <div class="key-help" id="keyHelp">
-    <div class="key-help-title">Move</div>
-    <div class="key-help-row"><kbd>T</kbd><kbd>U</kbd><span>Up-left / Up-right</span></div>
-    <div class="key-help-row"><kbd>G</kbd><kbd>H</kbd><span>Left / Right</span></div>
-    <div class="key-help-row"><kbd>V</kbd><kbd>N</kbd><span>Down-left / Down-right</span></div>
-  </div>
   <header class="hdr">
     <div class="hdr-title">⛰️ 天下の階段<span class="hdr-subtitle">The Stairway of Japanese Legends</span></div>
     <div class="hdr-stat stage" id="statStage">Stage 1 / 10</div>
@@ -1947,10 +1948,20 @@ function fitTextFontPx(text, basePx, minPx) {
 // reading as a vertical column instead of the horizontal word it is (Alan:
 // "needs to be displayed horizontal... fix the box"). Each kanji glyph is
 // roughly as wide as it is tall, so this widens close to linearly with the
-// character count rather than the flatter 1.8x used for English/readings.
+// character count rather than the flatter multiplier used for
+// English/readings below.
+//
+// E2J_R2J_WIDE_MULTIPLIER: e2j/r2j cells are EVERY open cell on stage 2
+// (both game modes) and half of stage 3's, so this multiplier alone sets
+// how big those whole stages look — a flat 1.8x here made stage 2/3 read
+// "a little too big" (Alan) even after the general cell-size pass, since a
+// short gloss like "cat" got the exact same oversized box as a long one.
+// 1.45 leans on fitTextFontPx's existing font-shrink-and-wrap for anything
+// long, rather than the box doing all the work.
+const E2J_R2J_WIDE_MULTIPLIER = 1.45;
 function cellBoxWidthPx(cell, cellSize) {
   if (!cell.revealed || cell.state === 'blocked' || !cell.item) return cellSize;
-  if (modeAnswerIsKanji(cell.mode)) return Math.round(cellSize * 1.8);
+  if (modeAnswerIsKanji(cell.mode)) return Math.round(cellSize * E2J_R2J_WIDE_MULTIPLIER);
   const len = String(cell.item.display || '').length;
   if (len > 1) return Math.round(cellSize * Math.min(1 + (len - 1) * 0.92, 3.6));
   return cellSize;
@@ -1967,6 +1978,28 @@ function cellBoxWidthPx(cell, cellSize) {
 // the peak row — so the whole row always fits, falling back to the plain
 // square (relying on fitTextFontPx's font shrink) only when a row has no
 // slack at all.
+//
+// cjkNoWrapFontCapPx: a compounds-mode j2e/j2r cell's face is the compound
+// word itself (2-4 kanji, no spaces to wrap on — see cellBoxWidthPx()
+// above), and CJK glyphs render close to as wide as they are tall in every
+// font actually used here, so the number of characters — not just the box
+// width — decides whether the word fits on its one line. Sizing the font
+// purely as a fraction of the box (the old flat ratio) meant a 3-4
+// character word could still be wider than its own box once drawn (Alan:
+// "the compound Japanese text is too big for the boxes... seems to be the
+// same words" — i.e. the longer compounds, consistently, not a per-render
+// fluke). This works out the largest font that actually lets `len`
+// characters sit on one line inside the box, so renderGrid() can cap the
+// font to it instead of trusting the box-width ratio alone.
+function cjkNoWrapFontCapPx(boxWidth, len) {
+  if (!(len > 0) || !Number.isFinite(boxWidth)) return Infinity;
+  const interior = boxWidth - 10; // matches .cell's 3px padding + 2px border per side
+  if (interior <= 0) return 8;
+  // A small per-character safety margin (1.05, not 1.0) absorbs normal
+  // font-metric variance between characters/fonts without needing to
+  // special-case any specific glyph.
+  return Math.max(8, Math.floor(interior / (len * 1.05)));
+}
 function rowBoxWidths(rowCells, cellSize, gap, availW) {
   const rowLen = rowCells.length;
   const naturalWidths = rowCells.map(cell => cellBoxWidthPx(cell, cellSize));
@@ -2036,7 +2069,26 @@ function renderGrid() {
       const boxWidth = boxWidths[col];
       const isWideBox = boxWidth !== cellSize;
       if (isWideBox) div.style.width = boxWidth + 'px'; // height stays the row's normal square size
-      const localBaseFontPx = isWideBox ? Math.max(8, Math.floor(boxWidth * 0.30)) : baseFontPx;
+      let localBaseFontPx = isWideBox ? Math.max(8, Math.floor(boxWidth * 0.30)) : baseFontPx;
+      // Cap a CJK compound-face cell's font to what cjkNoWrapFontCapPx() says
+      // will actually fit on one line (see its comment above), and stop the
+      // text wrapping (word-break would otherwise split it between two
+      // characters and read as a vertical column) — any tiny residual
+      // overflow from font-metric rounding then spills evenly left/right
+      // instead of vertically, which is far less jarring. Deliberately NOT
+      // gated on isWideBox: a row with no slack left falls the box back to
+      // the plain square (see rowBoxWidths()) without shrinking the font to
+      // match, so a long compound landing in a zero-slack row needs this
+      // cap just as much as a widened one does — boxWidth already equals
+      // cellSize in that fallback case, so the same cap formula still
+      // applies correctly.
+      if (cell.revealed && cell.item && !modeAnswerIsKanji(cell.mode)) {
+        const wordLen = String(cell.item.display || '').length;
+        if (wordLen > 1) {
+          localBaseFontPx = Math.min(localBaseFontPx, cjkNoWrapFontCapPx(boxWidth, wordLen));
+          div.style.whiteSpace = 'nowrap';
+        }
+      }
       if (cell.state === 'blocked') {
         div.textContent = '✕';
       } else if (cell.state === 'wrong') {
