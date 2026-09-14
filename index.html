@@ -233,7 +233,14 @@ input, select { font-family: inherit; }
 
 /* ── Game area ── */
 .play-area { flex: 1; min-height: 0; display: flex; overflow: hidden; }
-.game-wrap { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 16px; overflow: hidden; }
+/* align-items:flex-start (not center) + overflow-y:auto: the grid can now
+   run taller than the viewport at any screen width (see computeCellSize() —
+   Alan wants cells "large and clear" even if not all 10 rows fit on
+   screen), and centering a scrollable child clips its overflow out of
+   reach, so the top rows (the peak) stay reachable by scrolling up instead
+   of being centered partly off-screen with no way to scroll to it (see
+   selectCell()'s scrollIntoView, which follows the current selection). */
+.game-wrap { flex: 1; min-height: 0; display: flex; align-items: flex-start; justify-content: center; padding: 16px; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; }
 
 /* ── Click-to-select answer panel (input mode "click") ── */
 .choices-panel {
@@ -318,19 +325,6 @@ input, select { font-family: inherit; }
 @media (max-width: 820px) {
   .play-area { flex-direction: column; overflow: auto; }
   .choices-panel { width: 100%; max-height: 160px; border-left: none; border-top: 1px solid var(--border); flex-direction: row; flex-wrap: wrap; }
-  /* On a phone there isn't room to shrink 10 rows down to fit the visible
-     height without the cells becoming unreadably tiny (Alan: "much too
-     small"). Below this width, computeCellSize() sizes cells by width alone
-     and lets the grid run taller than the screen — this scrolls to it
-     instead of squashing it, with align-items switched to flex-start so the
-     top rows (the peak) stay reachable by scrolling up, rather than getting
-     centered partly off-screen with no way to scroll to it (see
-     selectCell()'s scrollIntoView, which follows the current selection). */
-  .game-wrap {
-    align-items: flex-start;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-  }
 }
 #grid {
   display: flex;
@@ -1805,35 +1799,23 @@ document.getElementById('choicesPanel').addEventListener('click', (e) => {
   handleChoiceClick(Number(btn.dataset.idx));
 });
 
-// The width threshold below which the game area switches to a single
-// scrollable column (matches the .play-area/.game-wrap phone breakpoint in
-// the CSS — see the "@media (max-width: 820px)" block).
-const NARROW_LAYOUT_PX = 820;
-
 function computeCellSize() {
   const gridEl = document.getElementById('grid');
   const wrap = gridEl.parentElement;
   const peakWidth = Math.max(...ROW_LENGTHS, 1);
-  const rows = ROW_LENGTHS.length || 1;
   const gap = 8;
   const pad = 36; // roughly matches .game-wrap's own padding on each axis
   const rawW = (wrap && typeof wrap.clientWidth === 'number' && wrap.clientWidth > 0) ? wrap.clientWidth : 600;
   const availW = rawW - pad;
-  const availH = (wrap && typeof wrap.clientHeight === 'number' && wrap.clientHeight > 0) ? wrap.clientHeight - pad : 600;
-  const sizeByWidth  = Math.floor((availW - (peakWidth - 1) * gap) / peakWidth);
-  const sizeByHeight = Math.floor((availH - (rows - 1) * gap) / rows);
-  // On a narrow (phone-width) screen there's rarely enough vertical room to
-  // also fit all 10 rows without shrinking cells to the point of being
-  // unreadable (Alan: "the grid much too small... maybe we only see the
-  // first few rows on the phone and as we select the screen can be scrolled
-  // upwards"). So below NARROW_LAYOUT_PX, size by width ALONE and let the
-  // grid run taller than the viewport — .game-wrap scrolls to it instead
-  // (see the CSS), and selectCell() scrolls the current selection into view
-  // as you climb. A wide-but-short window (e.g. a resized desktop browser)
-  // still gets the old "contain both axes" behavior, since that's a
-  // genuinely limited-height case, not a phone.
-  const narrow = rawW <= NARROW_LAYOUT_PX;
-  let size = narrow ? sizeByWidth : Math.min(sizeByWidth, sizeByHeight);
+  const sizeByWidth = Math.floor((availW - (peakWidth - 1) * gap) / peakWidth);
+  // Size by width ALONE, on every screen size — not just phones. Alan: "it's
+  // OK if the full 10 rows don't fit on the screen and we have to scroll up
+  // a little. I'd rather the kanji / words are large and clear." So the
+  // grid is free to run taller than the viewport at any width, and
+  // .game-wrap scrolls to it instead of squashing cells down to fit every
+  // row (see the CSS), while selectCell()'s scrollIntoView keeps the
+  // current selection reachable as you climb.
+  let size = sizeByWidth;
   if (!Number.isFinite(size) || size <= 0) size = 40;
   size = Math.max(14, Math.min(size, 140));
   gridEl.style.setProperty('--cell-size', size + 'px');
@@ -2041,9 +2023,9 @@ function selectCell(row, col, focusInput) {
   scrollSelectedIntoView(row, col);
 }
 
-// On the phone-width scrollable layout (see computeCellSize()/the
-// "@media (max-width: 820px)" .game-wrap rule), the grid can run taller
-// than the screen — this follows the current selection so climbing upward
+// The grid is now always a scrollable column (see computeCellSize()/the
+// .game-wrap rule) and can run taller than the screen at any width — this
+// follows the current selection so climbing upward
 // scrolls the view up with it instead of leaving the player to hunt for
 // their own selected space. renderGrid() rebuilds every cell <div> fresh on
 // every call, so this must run AFTER that render, against the fresh node.
