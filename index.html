@@ -240,7 +240,54 @@ input, select { font-family: inherit; }
    reach, so the top rows (the peak) stay reachable by scrolling up instead
    of being centered partly off-screen with no way to scroll to it (see
    selectCell()'s scrollIntoView, which follows the current selection). */
-.game-wrap { flex: 1; min-height: 0; display: flex; align-items: flex-start; justify-content: center; padding: 16px; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+.game-wrap {
+  position: relative; /* anchors the scroll-pad buttons (see below) */
+  flex: 1; min-height: 0; display: flex; align-items: flex-start; justify-content: center;
+  padding: 16px; overflow: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+}
+/* rowBoxWidths() (see the JS) keeps a row's own widened cells from
+   overflowing, but overflow-x was still hidden outright — on a mouse/
+   trackpad desktop that meant the only way to reach anything past the
+   right/left edge (an edge case the width-clamp doesn't fully rule out,
+   e.g. an unusually tall random pyramid, browser zoom, or a system font
+   rendering a touch wider) was a two-finger trackpad swipe most people
+   never think to try, and nothing at all with a plain mouse (Alan: "on the
+   desktop version... I cannot move the screen right or left"). auto lets a
+   real scrollbar/trackpad swipe reach it when needed, and does nothing
+   otherwise. Thin, theme-colored scrollbar so it doesn't look like a
+   generic browser chrome element dropped into a dark game screen. */
+.game-wrap::-webkit-scrollbar { width: 8px; height: 8px; }
+.game-wrap::-webkit-scrollbar-track { background: transparent; }
+.game-wrap::-webkit-scrollbar-thumb { background: rgba(201,169,110,.35); border-radius: 8px; }
+.game-wrap::-webkit-scrollbar-thumb:hover { background: rgba(201,169,110,.55); }
+.game-wrap { scrollbar-width: thin; scrollbar-color: rgba(201,169,110,.35) transparent; }
+/* Explicit up/down/left/right nudge buttons floating over the grid — Alan
+   asked directly for "a way to scroll with arrow buttons" as a sure,
+   discoverable way to reach the whole pyramid regardless of input device
+   (mouse wheel only scrolls vertically without an awkward Shift-hold; not
+   every trackpad/mouse gives an obvious horizontal gesture). Harmless to
+   press when already at a scroll limit (scrollGameWrap() just no-ops). */
+.scroll-pad-btn {
+  position: absolute;
+  z-index: 6;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: rgba(20,20,40,.68);
+  border: 1px solid rgba(201,169,110,.45);
+  color: var(--gold);
+  font-size: 1rem;
+  line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  opacity: .55;
+  transition: opacity .15s ease, background .15s ease;
+}
+.scroll-pad-btn:hover { opacity: 1; background: rgba(20,20,40,.88); }
+.scroll-pad-btn.up    { top: 6px;    left: 50%; transform: translateX(-50%); }
+.scroll-pad-btn.down  { bottom: 6px; left: 50%; transform: translateX(-50%); }
+.scroll-pad-btn.left  { left: 6px;   top: 50%;  transform: translateY(-50%); }
+.scroll-pad-btn.right { right: 6px;  top: 50%;  transform: translateY(-50%); }
 
 /* ── Click-to-select answer panel (input mode "click") ── */
 .choices-panel {
@@ -644,6 +691,12 @@ input, select { font-family: inherit; }
   <div class="play-area">
     <div class="game-wrap">
       <div id="grid"></div>
+      <div class="scroll-pad" id="scrollPad">
+        <button type="button" class="scroll-pad-btn up" data-dir="up" title="Scroll up" aria-label="Scroll up">▲</button>
+        <button type="button" class="scroll-pad-btn down" data-dir="down" title="Scroll down" aria-label="Scroll down">▼</button>
+        <button type="button" class="scroll-pad-btn left" data-dir="left" title="Scroll left" aria-label="Scroll left">◀</button>
+        <button type="button" class="scroll-pad-btn right" data-dir="right" title="Scroll right" aria-label="Scroll right">▶</button>
+      </div>
     </div>
     <div class="choices-panel" id="choicesPanel"></div>
   </div>
@@ -1813,6 +1866,12 @@ document.getElementById('choicesPanel').addEventListener('click', (e) => {
   handleChoiceClick(Number(btn.dataset.idx));
 });
 
+document.getElementById('scrollPad').addEventListener('click', (e) => {
+  const btn = e.target.closest('.scroll-pad-btn');
+  if (!btn) return;
+  scrollGameWrap(btn.dataset.dir);
+});
+
 function computeCellSize() {
   const gridEl = document.getElementById('grid');
   const wrap = gridEl.parentElement;
@@ -2087,6 +2146,30 @@ function scrollSelectedIntoView(row, col) {
   if (el && typeof el.scrollIntoView === 'function') {
     el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
   }
+}
+
+// The four floating scroll-pad buttons (see .scroll-pad-btn / #scrollPad) —
+// Alan: "Maybe a way to scroll with arrow buttons - up/down/left/right?"
+// after finding a plain mouse/trackpad gives no obvious way to reach
+// anything past the grid's left/right edge. Nudges .game-wrap by roughly
+// half its own visible size in the given direction; harmless to call at a
+// scroll limit (scrollBy just clamps there). #scrollPad lives outside
+// #grid, which renderGrid() rebuilds from scratch on every render, so the
+// buttons and this listener survive every climb/stage/selection change.
+function scrollGameWrap(dir) {
+  const wrap = document.querySelector('.game-wrap');
+  if (!wrap || typeof wrap.scrollBy !== 'function') return;
+  const stepY = Math.max(60, Math.round((wrap.clientHeight || 300) * 0.4));
+  const stepX = Math.max(60, Math.round((wrap.clientWidth || 300) * 0.4));
+  const deltas = {
+    up:    { top: -stepY, left: 0 },
+    down:  { top:  stepY, left: 0 },
+    left:  { top: 0,      left: -stepX },
+    right: { top: 0,      left:  stepX },
+  };
+  const delta = deltas[dir];
+  if (!delta) return;
+  wrap.scrollBy({ top: delta.top, left: delta.left, behavior: 'smooth' });
 }
 
 // Called on a fresh grid (new climb / new stage) — picks a bottom-row cell
