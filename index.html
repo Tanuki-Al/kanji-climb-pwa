@@ -240,7 +240,7 @@ input, select { font-family: inherit; }
    reach, so the top rows (the peak) stay reachable by scrolling up instead
    of being centered partly off-screen with no way to scroll to it (see
    selectCell()'s scrollIntoView, which follows the current selection). */
-.game-wrap { flex: 1; min-height: 0; display: flex; align-items: flex-start; justify-content: center; padding: 16px; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; }
+.game-wrap { flex: 1; min-height: 0; display: flex; align-items: flex-start; justify-content: center; padding: 16px; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
 
 /* ── Click-to-select answer panel (input mode "click") ── */
 .choices-panel {
@@ -323,7 +323,16 @@ input, select { font-family: inherit; }
 .choices-panel { display: none; }
 #appRoot.show-choices .choices-panel { display: flex; }
 @media (max-width: 820px) {
-  .play-area { flex-direction: column; overflow: auto; }
+  /* Stacks the grid above the choices instead of side-by-side. Deliberately
+     NOT also setting overflow:auto here (the base .play-area rule already
+     has overflow:hidden) — .play-area itself must never become a second
+     scroll container layered around .game-wrap's own overflow-y:auto and
+     .choices-panel's own overflow-y:auto below, or iOS Safari can lock a
+     touch-scroll gesture onto the wrong ancestor and the page appears to
+     "get stuck" and stop responding to scrolling (Alan). Each scrollable
+     area (grid, choices) should be the only scroll container along its own
+     touch path. */
+  .play-area { flex-direction: column; }
   .choices-panel { width: 100%; max-height: 160px; border-left: none; border-top: 1px solid var(--border); flex-direction: row; flex-wrap: wrap; }
 }
 #grid {
@@ -349,7 +358,7 @@ input, select { font-family: inherit; }
   border-radius: 10px;
   font-size: var(--cell-font);
   font-weight: 600;
-  color: var(--muted2);
+  color: var(--muted);
   transition: transform .15s ease, opacity .3s ease, background .2s ease, border-color .2s ease;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
@@ -365,7 +374,12 @@ input, select { font-family: inherit; }
   word-break: break-word;
   hyphens: auto;
 }
-.cell.locked { opacity: .35; }
+/* Not-yet-reachable cells stay visibly dimmer than an available/pulsing
+   cell, but not so dim they're illegible — Alan: "the display on the phone
+   of the Japanese is not good" (locked cells were rgba(255,255,255,.36)
+   text at .35 element opacity, ~13% effective — nearly invisible on a dark
+   background, worse once the grid got bigger). */
+.cell.locked { opacity: .55; }
 .cell.available {
   color: var(--text);
   border-color: var(--gold);
