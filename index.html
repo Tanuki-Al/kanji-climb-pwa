@@ -109,6 +109,23 @@ input, select { font-family: inherit; }
   background: var(--bg3); color: var(--text); border: 1px solid var(--border);
   border-radius: 8px; width: 30px; height: 30px; font-size: .85rem;
 }
+/* Alan: "I seem to lose the records each time a new version is deployed...
+   keep these (or load them from somewhere)" — records live in localStorage,
+   tied to whichever browser/origin actually loaded the page, so redeploying
+   the file itself never touches them, but a different way of opening the
+   app (a raw file vs a server URL, a different device, or the phone PWA's
+   storage getting cleared by iOS after a stretch of no use) can look
+   exactly like losing them. These two buttons export/import a plain JSON
+   backup Alan can keep himself — see exportRecordsFile()/
+   importRecordsFromJson() below. */
+.records-io-btn {
+  background: var(--bg3); color: var(--text); border: 1px solid var(--border);
+  border-radius: 8px; padding: 0 10px; height: 30px; font-size: .68rem; font-weight: 600;
+}
+.records-io-btn:hover { border-color: var(--gold); }
+.records-io-feedback { font-size: .74rem; margin: -4px 0 10px; }
+.records-io-feedback.ok { color: var(--green); }
+.records-io-feedback.error { color: var(--redlit); }
 .records-table-wrap { overflow: auto; margin-top: 14px; border: 1px solid var(--border); border-radius: 10px; }
 .records-table { width: 100%; border-collapse: collapse; font-size: .78rem; }
 .records-table th, .records-table td { padding: 8px 12px; text-align: left; white-space: nowrap; }
@@ -587,7 +604,27 @@ input, select { font-family: inherit; }
 .end-stats { text-align: left; margin-bottom: 18px; }
 .end-stats-row { font-size: .76rem; color: var(--muted); margin-bottom: 5px; }
 .end-stats-best { color: var(--muted2); }
-.record-badge { color: var(--goldlit); font-weight: 700; }
+.record-badge { color: var(--goldlit); font-weight: 700; animation: record-badge-glow 1s ease-in-out 2; }
+@keyframes record-badge-glow {
+  0%, 100% { text-shadow: 0 0 0 rgba(232,201,135,0); }
+  50%      { text-shadow: 0 0 12px rgba(232,201,135,.9); }
+}
+/* ── Record celebration — Alan: "whenever a record is set (time or score)
+   at the end of stage/game - set a little celebration." A short burst of
+   gold confetti pieces, appended straight to <body> (same as .stage-toast/
+   .end-banner/etc. — see celebrateRecord()) so it always renders above
+   whatever popup it's celebrating. Purely decorative: fixed position (never
+   affects layout/scroll), pointer-events:none (never blocks a click), and
+   each piece removes itself once its own fall animation ends. ── */
+.confetti-piece {
+  position: fixed; top: -32px; z-index: 970; pointer-events: none;
+  line-height: 1; animation-name: confetti-fall; animation-timing-function: ease-in;
+  animation-fill-mode: forwards;
+}
+@keyframes confetti-fall {
+  0%   { transform: translateY(0) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(100vh) rotate(var(--spin, 360deg)); opacity: 0; }
+}
 .end-stats-note { display: block; margin-top: 6px; font-size: .68rem; color: var(--muted2); font-style: italic; }
 
 /* ── Stage gate — a deliberate pause between stages/the boss, instead of
@@ -802,8 +839,14 @@ input, select { font-family: inherit; }
   <div class="records-card">
     <div class="records-header">
       <div class="records-title">🏆 Climb Records</div>
-      <button class="records-close" id="btnCloseRecords" type="button">✕</button>
+      <div style="display:flex; align-items:center; gap:6px;">
+        <button class="records-io-btn" id="btnExportRecords" type="button" title="Download a backup of your records as a JSON file">⬇ Backup</button>
+        <button class="records-io-btn" id="btnImportRecords" type="button" title="Restore records from a backup JSON file">⬆ Restore</button>
+        <button class="records-close" id="btnCloseRecords" type="button">✕</button>
+      </div>
     </div>
+    <input type="file" id="importRecordsFile" accept="application/json" style="display:none;">
+    <div class="records-io-feedback" id="recordsIoFeedback" style="display:none;"></div>
     <div class="seg" id="recordsModeTabs">
       <button data-rmode="kanji" class="active">漢字 Kanji</button>
       <button data-rmode="compounds">熟語 Compounds</button>
@@ -820,6 +863,8 @@ input, select { font-family: inherit; }
           <tr>
             <th>Level</th>
             <th>Best Score</th>
+            <th>Stage Reached</th>
+            <th>Mistakes</th>
             <th>Best Full-Climb Time</th>
             <th>Boss (kept hidden)</th>
           </tr>
@@ -1476,6 +1521,7 @@ let gameOver = false;
 let reviewingStage = false;
 let lastClearedLabel = '';
 let lastClearedMs = 0;
+let lastClearedIsRecord = false; // this stage's own time just beat (or set) its stored per-stage best — see onStageWin()
 
 // Compounds-only: the currently chosen Category filter value, or 'all' if
 // unset/not on the compounds tab. Reads a plain <select> — no segmented
@@ -1643,6 +1689,126 @@ function loadRecordsForMode(mode) {
   } catch (e) { return {}; }
 }
 
+/*══════════════════════════════════════════════
+  RECORDS BACKUP/RESTORE (Alan: "I seem to lose the records each time a new
+  version is deployed... keep these (or load them from somewhere)"). Records
+  live in localStorage, tied to the browser/origin that loaded the page —
+  redeploying the FILE never touches that storage, but a different way of
+  opening the app (a raw file vs. a server URL, a different device, or the
+  phone PWA's storage getting cleared by iOS after a stretch of no use) looks
+  exactly like losing them. Export writes both record books to one JSON file;
+  Import merges a previously-exported file back in, keeping — per field,
+  per level — whichever of the two sides is actually better, so restoring an
+  older backup can never silently erase a stronger record set on this device.
+══════════════════════════════════════════════*/
+function mergeOneLevelRecord(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  const merged = Object.assign({}, a, b);
+  merged.bestScore = (a.bestScore == null) ? b.bestScore : (b.bestScore == null) ? a.bestScore : Math.max(a.bestScore, b.bestScore);
+  // bestScoreStageLabel/bestScoreWrong describe whichever run set bestScore
+  // — they have to travel with whichever side actually won that comparison.
+  if (a.bestScore != null && (b.bestScore == null || a.bestScore >= b.bestScore)) {
+    merged.bestScoreStageLabel = a.bestScoreStageLabel;
+    merged.bestScoreWrong = a.bestScoreWrong;
+  } else {
+    merged.bestScoreStageLabel = b.bestScoreStageLabel;
+    merged.bestScoreWrong = b.bestScoreWrong;
+  }
+  merged.bestTimeMs = (a.bestTimeMs == null) ? b.bestTimeMs : (b.bestTimeMs == null) ? a.bestTimeMs : Math.min(a.bestTimeMs, b.bestTimeMs);
+  merged.bossBestScore = (a.bossBestScore == null) ? b.bossBestScore : (b.bossBestScore == null) ? a.bossBestScore : Math.max(a.bossBestScore, b.bossBestScore);
+  if (a.bossBestScore != null && (b.bossBestScore == null || a.bossBestScore >= b.bossBestScore)) {
+    merged.bossBestRevealed = a.bossBestRevealed;
+    merged.bossBestTotal = a.bossBestTotal;
+  } else {
+    merged.bossBestRevealed = b.bossBestRevealed;
+    merged.bossBestTotal = b.bossBestTotal;
+  }
+  merged.stagesBestWrong = (a.stagesBestWrong == null) ? b.stagesBestWrong : (b.stagesBestWrong == null) ? a.stagesBestWrong : Math.min(a.stagesBestWrong, b.stagesBestWrong);
+  merged.stagesBestCorrect = (a.stagesBestWrong != null && (b.stagesBestWrong == null || a.stagesBestWrong <= b.stagesBestWrong))
+    ? a.stagesBestCorrect : b.stagesBestCorrect;
+  const times = Object.assign({}, a.stageBestTimesMs || {});
+  Object.keys(b.stageBestTimesMs || {}).forEach((k) => {
+    const bv = b.stageBestTimesMs[k];
+    if (times[k] == null || bv < times[k]) times[k] = bv;
+  });
+  merged.stageBestTimesMs = times;
+  return merged;
+}
+function mergeLevelRecords(existing, incoming) {
+  const out = Object.assign({}, existing || {});
+  Object.keys(incoming || {}).forEach((level) => {
+    out[level] = mergeOneLevelRecord((existing || {})[level], incoming[level]);
+  });
+  return out;
+}
+
+function exportRecordsFile() {
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    kanji: loadRecordsForMode('kanji'),
+    compounds: loadRecordsForMode('compounds'),
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'kanji-climb-records-backup.json';
+  document.body.appendChild(a);
+  a.click();
+  a.parentNode.removeChild(a); // see celebrateRecord()'s comment on why not a.remove()
+  URL.revokeObjectURL(url);
+}
+
+// Pure (no localStorage/DOM access) so it's easy to test in isolation —
+// callers apply the returned records themselves.
+function parseRecordsBackup(text) {
+  let data;
+  try { data = JSON.parse(text); } catch (e) { return { ok: false, error: "That file isn't valid JSON." }; }
+  if (!data || typeof data !== 'object') return { ok: false, error: 'Unrecognized backup file.' };
+  const kanji = data.kanji && typeof data.kanji === 'object' ? data.kanji : null;
+  const compounds = data.compounds && typeof data.compounds === 'object' ? data.compounds : null;
+  if (!kanji && !compounds) return { ok: false, error: 'This file has no kanji or compounds records in it.' };
+  return { ok: true, kanji, compounds };
+}
+function importRecordsFromJson(text) {
+  const parsed = parseRecordsBackup(text);
+  if (!parsed.ok) return parsed;
+  if (parsed.kanji) localStorage.setItem(CLIMB_RECORDS_KEY, JSON.stringify(mergeLevelRecords(loadRecordsForMode('kanji'), parsed.kanji)));
+  if (parsed.compounds) localStorage.setItem(CLIMB_COMPOUNDS_RECORDS_KEY, JSON.stringify(mergeLevelRecords(loadRecordsForMode('compounds'), parsed.compounds)));
+  return { ok: true };
+}
+
+function showRecordsIoFeedback(text, isError) {
+  const el = document.getElementById('recordsIoFeedback');
+  if (!el) return;
+  el.textContent = text;
+  el.className = 'records-io-feedback ' + (isError ? 'error' : 'ok');
+  el.style.display = '';
+}
+
+document.getElementById('btnExportRecords').addEventListener('click', exportRecordsFile);
+document.getElementById('btnImportRecords').addEventListener('click', () => {
+  document.getElementById('importRecordsFile').click();
+});
+document.getElementById('importRecordsFile').addEventListener('change', (e) => {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const result = importRecordsFromJson(String(reader.result || ''));
+    if (result.ok) {
+      populateRecordsLevelFilter();
+      renderRecordsTable();
+      showRecordsIoFeedback('✓ Records restored from backup.', false);
+    } else {
+      showRecordsIoFeedback('✕ ' + result.error, true);
+    }
+  };
+  reader.readAsText(file);
+  e.target.value = ''; // allow re-selecting the same file later
+});
+
 // Sorts numeric levels in order, with 'none' first (no WK level at all —
 // conceptually "below" level 1) and 'master' last (everything, so it goes
 // after every specific level).
@@ -1682,23 +1848,30 @@ function getRecordsLevelFilter() {
 // time/boss).
 function renderRecordsSummaryTable() {
   document.getElementById('recordsTableHead').innerHTML =
-    '<tr><th>Level</th><th>Best Score</th><th>Best Full-Climb Time</th><th>Boss (kept hidden)</th></tr>';
+    '<tr><th>Level</th><th>Best Score</th><th>Stage Reached</th><th>Mistakes</th><th>Best Full-Climb Time</th><th>Boss (kept hidden)</th></tr>';
   const recs = loadRecordsForMode(recordsModalMode);
   const keys = Object.keys(recs).sort((a, b) => levelSortKey(a) - levelSortKey(b));
   const tbody = document.getElementById('recordsTableBody');
   if (!keys.length) {
     const modeLabel = recordsModalMode === 'compounds' ? 'Compounds' : 'Kanji';
-    tbody.innerHTML = `<tr><td colspan="4" class="records-empty">No ${esc(modeLabel)} records yet — climb something!</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" class="records-empty">No ${esc(modeLabel)} records yet — climb something!</td></tr>`;
     return;
   }
   tbody.innerHTML = keys.map((k) => {
     const r = recs[k] || {};
     const score = r.bestScore != null ? String(r.bestScore) : '—';
+    // bestScoreStageLabel/bestScoreWrong are the stage reached + mistake
+    // count for the SAME run that set bestScore (see endGame()) — a record
+    // saved before this was tracked just shows '—' for these two.
+    const stageReached = r.bestScoreStageLabel || '—';
+    const mistakes = r.bestScoreWrong != null ? String(r.bestScoreWrong) : '—';
     const time = r.bestTimeMs != null ? formatTime(r.bestTimeMs) : '—';
     const boss = (r.bossBestScore != null && r.bossBestTotal != null)
       ? `${r.bossBestScore}/${r.bossBestTotal} kept hidden`
       : '—';
-    return `<tr><td>${esc(levelDisplayName(k))}</td><td class="num">${esc(score)}</td><td class="num">${esc(time)}</td><td class="num">${esc(boss)}</td></tr>`;
+    return `<tr><td>${esc(levelDisplayName(k))}</td><td class="num">${esc(score)}</td>` +
+      `<td class="num">${esc(stageReached)}</td><td class="num">${esc(mistakes)}</td>` +
+      `<td class="num">${esc(time)}</td><td class="num">${esc(boss)}</td></tr>`;
   }).join('');
 }
 
@@ -2626,6 +2799,18 @@ function onStageWin() {
   if (timerEl) timerEl.textContent = '⏱ ' + formatTime(stageMs);
   lastClearedLabel = 'Stage ' + currentStage; // isBossStage is always still false here — the boss win returns above
   lastClearedMs = stageMs;
+  // Alan: "whenever a record is set (time or score) at the end of
+  // stage/game - set a little celebration" — a read-only peek at the
+  // stored per-stage best BEFORE endGame() ever writes anything this run
+  // (that persisting happens exactly as before, at the end of the run —
+  // this just predicts it early enough to celebrate right here). Safe to
+  // predict: once a stage is actually cleared its time is always eventually
+  // committed by endGame(), win or lose (only the LAST, still-in-progress
+  // stage can ever be excluded — see the "per-stage fastest-clear time"
+  // logic there), and a given stage number is only ever cleared once per run.
+  const priorRec = recordLevel != null ? getLevelRecord(recordLevel) : null;
+  const priorStageBestMs = priorRec && priorRec.stageBestTimesMs ? priorRec.stageBestTimesMs[String(currentStage)] : null;
+  lastClearedIsRecord = recordLevel != null && (priorStageBestMs == null || stageMs < priorStageBestMs);
   stageTimes.push({ stage: currentStage, ms: stageMs });
   gameOver = true; // block input until the player deliberately continues (see the stage gate below)
   // The just-finished board stays up, untouched, until the player actually
@@ -2670,6 +2855,37 @@ function showStageToast(text) {
   t.textContent = text;
   t.classList.add('show');
   setTimeout(() => t.classList.remove('show'), 1000);
+}
+
+// Alan: "whenever a record is set (time or score) at the end of stage/game
+// - set a little celebration." A short burst of falling gold confetti,
+// called once wherever a record was actually just beaten — onStageWin()'s
+// per-stage time (via openStageGate()) and endGame()'s score/full-climb
+// time/boss/stages-1-10 records (see both call sites below). Appended
+// straight to <body>, same as .stage-toast/.end-banner/the modals, so it
+// always sits above whichever popup it's celebrating; each piece cleans
+// itself up once its own fall animation ends, so nothing ever accumulates.
+const CONFETTI_EMOJI = ['🎉', '✨', '🏆', '🎊'];
+function celebrateRecord() {
+  const body = document.body;
+  if (!body || typeof body.appendChild !== 'function') return;
+  const count = 20;
+  for (let i = 0; i < count; i++) {
+    const piece = document.createElement('div');
+    piece.className = 'confetti-piece';
+    piece.textContent = CONFETTI_EMOJI[Math.floor(Math.random() * CONFETTI_EMOJI.length)];
+    const durationMs = Math.round((1.1 + Math.random() * 0.8) * 1000);
+    piece.style.left = Math.round(Math.random() * 100) + 'vw';
+    piece.style.fontSize = (0.9 + Math.random() * 0.7).toFixed(2) + 'rem';
+    piece.style.animationDuration = durationMs + 'ms';
+    piece.style.animationDelay = Math.round(Math.random() * 300) + 'ms';
+    piece.style.setProperty('--spin', (Math.random() < 0.5 ? '-' : '') + '360deg');
+    body.appendChild(piece);
+    // parentNode.removeChild(), not the newer piece.remove() — the exact
+    // same node either way, but this also works against the test harness's
+    // fake DOM stubs, which don't implement ChildNode.remove().
+    setTimeout(() => { if (piece.parentNode) piece.parentNode.removeChild(piece); }, durationMs + 400);
+  }
 }
 
 // Item 7 (and Alan's follow-up refinements): what a given stage/the boss
@@ -2742,8 +2958,14 @@ function openStageGate() {
   // Alan: "the time shown in a results popup" — the stage just finished
   // (frozen by onStageWin(), well before this popup even opens), shown
   // above the upcoming stage's own briefing so both are visible at once.
-  document.getElementById('gateCleared').textContent =
-    `✓ ${lastClearedLabel} cleared in ${formatTime(lastClearedMs)}`;
+  // Alan (separate request): "whenever a record is set... set a little
+  // celebration" — lastClearedIsRecord was worked out back in onStageWin();
+  // this is just where it's actually shown/celebrated, since the popup is
+  // the natural "end of stage" moment.
+  document.getElementById('gateCleared').innerHTML =
+    `✓ ${esc(lastClearedLabel)} cleared in ${esc(formatTime(lastClearedMs))}` +
+    (lastClearedIsRecord ? ' <span class="record-badge">🏆 New Best!</span>' : '');
+  if (lastClearedIsRecord) celebrateRecord();
   document.getElementById('gateJP').textContent = stageNameJP(currentStage, isBossStage);
   document.getElementById('gateTitle').textContent = stageThemeName(currentStage, isBossStage);
   document.getElementById('gateTask').textContent = stageModeSummary(currentStage, isBossStage);
@@ -2805,7 +3027,19 @@ function endGame(won) {
   const runScore = computeRunScore(totalMs, wrongCount, peeksUsed);
   if (recordLevel != null) {
     newScoreRecord = !levelRecord || levelRecord.bestScore == null || runScore > levelRecord.bestScore;
-    if (newScoreRecord) levelRecord = updateLevelRecord(recordLevel, { bestScore: runScore });
+    if (newScoreRecord) {
+      // Alan: "in the Climb Records show the stage reached and the number
+      // of mistakes" — the bare score number alone doesn't say whether it
+      // came from a fast partial run or a full clear, so the record now
+      // also remembers how far THIS score-setting run got and how many
+      // mistakes it made along the way (see renderRecordsSummaryTable()).
+      const stageReachedLabel = won ? 'Cleared! 🏔️' : (isBossStage ? 'Boss Battle' : `Stage ${currentStage}/${MAX_STAGE}`);
+      levelRecord = updateLevelRecord(recordLevel, {
+        bestScore: runScore,
+        bestScoreStageLabel: stageReachedLabel,
+        bestScoreWrong: wrongCount,
+      });
+    }
   }
 
   if (recordLevel != null && won && isBossStage) {
@@ -2853,6 +3087,11 @@ function endGame(won) {
     buildEndStatsHtml(totalMs, bossInfo, levelRecord, newTimeRecord, newBossRecord, runScore, newScoreRecord);
   banner.classList.add('open');
   renderAnswerChoices(); // freeze the click-mode panel (gameOver now disables every box)
+  // Alan: "whenever a record is set (time or score) at the end of
+  // stage/game - set a little celebration" — any one of the four record
+  // flags above (score, full-climb time, boss, or the stages-1-10 wrong-
+  // answer checkpoint) is enough to set it off once here.
+  if (newScoreRecord || newTimeRecord || newBossRecord || stagesRecordBeaten) celebrateRecord();
 }
 
 // Alan's spec: elapsed time in whole seconds minus 20 points per wrong
