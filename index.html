@@ -599,13 +599,52 @@ input, select { font-family: inherit; }
 }
 .stage-gate.open { display: flex; }
 .stage-gate-card {
+  position: relative;
   background: var(--bg2); border: 1px solid var(--gold); border-radius: var(--radius);
   padding: 30px 28px; text-align: center; max-width: 340px;
+}
+/* Alan: "let's not force the next stage on the player" — this closes the
+   popup WITHOUT starting anything (see closeStageGate() in the script): the
+   just-cleared board stays up for review and #btnHdrNextStage takes over as
+   the way to actually continue (see the header). */
+.stage-gate-close { position: absolute; top: 10px; right: 10px; }
+/* Alan: "the time shown in a results popup" — the stage just finished,
+   frozen the instant it was cleared (see onStageWin()), not the upcoming
+   one below it. */
+.stage-gate-cleared {
+  font-size: .8rem; font-weight: 700; color: var(--green);
+  margin: 4px 0 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border);
 }
 .stage-gate-jp { font-size: 1.5rem; font-weight: 700; color: var(--goldlit); margin-bottom: 4px; }
 .stage-gate-title { font-size: 1.05rem; font-weight: 700; color: var(--text); margin-bottom: 6px; }
 .stage-gate-task { font-size: .82rem; color: var(--muted); margin-bottom: 14px; }
 .stage-gate-best { font-size: .78rem; color: var(--muted2); margin-bottom: 20px; line-height: 1.5; }
+
+/* ── Cell review popup — while reviewingStage is true (between clearing a
+   stage and actually starting the next one), clicking ANY space on the
+   just-finished board opens this instead of playing a move (Alan: "click on
+   any of the grid spaces to get the results filled in for a review"). Every
+   open cell already carries its item/mode from grid generation regardless
+   of whether it was ever revealed in play (see assignCellModesAndItems()),
+   so this can show the full answer even for a space he never visited. ── */
+.cell-review-modal {
+  position: fixed; inset: 0; background: rgba(0,0,0,.7);
+  display: none; align-items: center; justify-content: center; z-index: 940; padding: 20px;
+}
+.cell-review-modal.open { display: flex; }
+.cell-review-card {
+  position: relative;
+  background: var(--bg2); border: 1px solid var(--gold); border-radius: var(--radius);
+  padding: 28px 24px 22px; width: min(92vw, 360px); text-align: center;
+}
+.cell-review-status { font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 10px; }
+.cell-review-status.cleared { color: var(--green); }
+.cell-review-status.wrong { color: var(--redlit); }
+.cell-review-status.unseen { color: var(--muted2); }
+.cell-review-face { font-size: 1.9rem; font-weight: 700; color: var(--goldlit); margin-bottom: 16px; word-break: break-word; }
+.cell-review-rows { text-align: left; display: flex; flex-direction: column; gap: 10px; }
+.cell-review-row-label { font-size: .66rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 2px; }
+.cell-review-row-value { font-size: .92rem; color: var(--text); font-weight: 600; }
 
 @media (max-width: 560px) {
   .hdr { padding: 8px 12px; }
@@ -697,6 +736,7 @@ input, select { font-family: inherit; }
     <div class="hdr-stat" id="statTimer">⏱ 0:00</div>
     <div class="hdr-spacer"></div>
     <button class="hdr-btn" id="btnPeek" style="display:none;" title="Reveal a random hidden space without answering it — costs 20 points">👁 Peek (-20)</button>
+    <button class="hdr-btn primary" id="btnHdrNextStage" style="display:none;" title="Continue to the next stage">▶ Next Stage</button>
     <button class="hdr-btn primary" id="btnNewGame">↻ New Game</button>
   </header>
 
@@ -729,11 +769,22 @@ input, select { font-family: inherit; }
 
 <div class="stage-gate" id="stageGate">
   <div class="stage-gate-card">
+    <button class="records-close stage-gate-close" id="btnGateClose" type="button" title="Close — review the board, then use Next Stage in the header when ready">✕</button>
+    <div class="stage-gate-cleared" id="gateCleared"></div>
     <div class="stage-gate-jp" id="gateJP"></div>
     <div class="stage-gate-title" id="gateTitle"></div>
     <div class="stage-gate-task" id="gateTask"></div>
     <div class="stage-gate-best" id="gateBest"></div>
     <button class="btn-start" id="btnGateStart">▶ Start</button>
+  </div>
+</div>
+
+<div class="cell-review-modal" id="cellReviewModal">
+  <div class="cell-review-card">
+    <button class="records-close" id="btnCloseCellReview" type="button">✕</button>
+    <div class="cell-review-status" id="reviewStatus"></div>
+    <div class="cell-review-face" id="reviewFace"></div>
+    <div class="cell-review-rows" id="reviewRows"></div>
   </div>
 </div>
 
@@ -1411,6 +1462,20 @@ let clearedCount = 0;
 let wrongCount = 0;
 let selected = null;   // {row, col} of the currently keyboard/tap-selected cell
 let gameOver = false;
+// The pause between clearing a stage and actually starting the next one
+// (Alan: "the clock should stop immediately on completion of a stage... it
+// is possible to click on any of the grid spaces to get the results filled
+// in for a review"). True from the instant onStageWin() fires until
+// closeStageGateAndStart() actually deals the next grid — during that
+// window the just-finished board stays on screen, untouched, and clicking
+// ANY of its spaces opens a review popup instead of playing a move (see the
+// #grid click listener below). lastClearedLabel/lastClearedMs are the stage
+// name + frozen time shown in the stage-gate popup and (while it's open)
+// nowhere else — the header's own timer is frozen by clearInterval, not by
+// this flag.
+let reviewingStage = false;
+let lastClearedLabel = '';
+let lastClearedMs = 0;
 
 // Compounds-only: the currently chosen Category filter value, or 'all' if
 // unset/not on the compounds tab. Reads a plain <select> — no segmented
@@ -2330,9 +2395,56 @@ function autoAdvanceSelection(fromRow, fromCol) {
   else selectFirstAvailable(); // no-op if truly nothing is available (game over handles this)
 }
 
+// Alan: "it is possible to click on any of the grid spaces to get the
+// results filled in (for a review)" — while reviewingStage is true (see
+// onStageWin()), the just-finished board is frozen for play but every space
+// is still clickable, for review rather than for a move. Every open cell
+// already carries its real item/mode from grid generation (see
+// assignCellModesAndItems()) whether or not it was ever revealed in play,
+// so a space he never actually visited can still be reviewed in full.
+function openCellReview(row, col) {
+  const cell = grid[row] && grid[row][col];
+  if (!cell || cell.state === 'blocked' || !cell.item) return; // nothing to show for an obstacle space
+  const item = cell.item;
+  const statusEl = document.getElementById('reviewStatus');
+  if (cell.state === 'cleared') {
+    statusEl.textContent = '✓ Answered correctly';
+    statusEl.className = 'cell-review-status cleared';
+  } else if (cell.state === 'wrong') {
+    statusEl.textContent = '✕ Answered wrong';
+    statusEl.className = 'cell-review-status wrong';
+  } else {
+    statusEl.textContent = '— Not attempted this climb';
+    statusEl.className = 'cell-review-status unseen';
+  }
+  document.getElementById('reviewFace').textContent = item.display;
+  const rows = [];
+  if (item.type === 'compound') {
+    rows.push(['Reading', item.primaryReading]);
+    rows.push(['Meaning', item.primaryMeaning]);
+  } else {
+    rows.push(['Meaning', item.primaryMeaning]);
+    rows.push(["On'yomi", item.primaryOn || '(none)']);
+    rows.push(["Kun'yomi", item.primaryKun || '(none)']);
+  }
+  document.getElementById('reviewRows').innerHTML = rows.map(([label, value]) =>
+    `<div><div class="cell-review-row-label">${esc(label)}</div><div class="cell-review-row-value">${esc(value)}</div></div>`
+  ).join('');
+  document.getElementById('cellReviewModal').classList.add('open');
+}
+function closeCellReview() {
+  document.getElementById('cellReviewModal').classList.remove('open');
+}
+document.getElementById('btnCloseCellReview').addEventListener('click', closeCellReview);
+document.getElementById('cellReviewModal').addEventListener('click', (e) => {
+  if (e.target.id === 'cellReviewModal') closeCellReview(); // click on the backdrop, not the card
+});
+
 document.getElementById('grid').addEventListener('click', (e) => {
   const cellEl = e.target.closest('.cell');
-  if (!cellEl || gameOver) return;
+  if (!cellEl) return;
+  if (reviewingStage) { openCellReview(Number(cellEl.dataset.row), Number(cellEl.dataset.col)); return; }
+  if (gameOver) return;
   selectCell(Number(cellEl.dataset.row), Number(cellEl.dataset.col), true);
 });
 
@@ -2504,8 +2616,23 @@ function checkEndState(lastRow) {
 // selection, one more blocked cell than before); stage 10 wins the climb.
 function onStageWin() {
   if (isBossStage) { endGame(true); return; } // the boss is beaten — the whole climb is won
-  stageTimes.push({ stage: currentStage, ms: Date.now() - stageStartTime });
+  // Alan: "the clock should stop immediately on completion of a stage" —
+  // stop it (and freeze the header's own readout to the exact figure, not
+  // whatever the last 250ms-old tick left showing) the instant the win is
+  // detected, well before the toast/gate popup even appears below.
+  clearInterval(timerInterval);
+  const stageMs = Date.now() - stageStartTime;
+  const timerEl = document.getElementById('statTimer');
+  if (timerEl) timerEl.textContent = '⏱ ' + formatTime(stageMs);
+  lastClearedLabel = 'Stage ' + currentStage; // isBossStage is always still false here — the boss win returns above
+  lastClearedMs = stageMs;
+  stageTimes.push({ stage: currentStage, ms: stageMs });
   gameOver = true; // block input until the player deliberately continues (see the stage gate below)
+  // The just-finished board stays up, untouched, until the player actually
+  // starts the next stage — see the #grid click listener (review mode) and
+  // closeStageGateAndStart() (the only place this turns back off).
+  reviewingStage = true;
+  document.getElementById('btnHdrNextStage').style.display = '';
   if (currentStage >= MAX_STAGE) {
     recordStagesResult(); // stages 1-10 are done — check/update the per-level record
     showStageToast(`Stage ${currentStage} clear! → ⚔ BOSS BATTLE`);
@@ -2612,6 +2739,11 @@ document.getElementById('stageBrief').addEventListener('click', () => {
 // click rather than auto-continuing on a fixed timer.
 function openStageGate() {
   const theme = stageTheme(currentStage, isBossStage);
+  // Alan: "the time shown in a results popup" — the stage just finished
+  // (frozen by onStageWin(), well before this popup even opens), shown
+  // above the upcoming stage's own briefing so both are visible at once.
+  document.getElementById('gateCleared').textContent =
+    `✓ ${lastClearedLabel} cleared in ${formatTime(lastClearedMs)}`;
   document.getElementById('gateJP').textContent = stageNameJP(currentStage, isBossStage);
   document.getElementById('gateTitle').textContent = stageThemeName(currentStage, isBossStage);
   document.getElementById('gateTask').textContent = stageModeSummary(currentStage, isBossStage);
@@ -2621,11 +2753,27 @@ function openStageGate() {
     '▶ Face ' + (theme.name || (isBossStage ? 'Boss Battle' : 'Stage ' + currentStage));
   document.getElementById('stageGate').classList.add('open');
 }
+// Alan: "it is possible to close the pop up" — dismiss it WITHOUT starting
+// the next stage. reviewingStage stays true and #btnHdrNextStage stays
+// visible in the header (it was already shown by onStageWin(), before this
+// popup even opened) — that's the only way to actually continue once the
+// popup's own "▶ Face..." button is gone.
+function closeStageGate() {
+  document.getElementById('stageGate').classList.remove('open');
+}
 function closeStageGateAndStart() {
   document.getElementById('stageGate').classList.remove('open');
+  document.getElementById('cellReviewModal').classList.remove('open');
+  reviewingStage = false;
+  document.getElementById('btnHdrNextStage').style.display = 'none';
   newGrid();
 }
 document.getElementById('btnGateStart').addEventListener('click', closeStageGateAndStart);
+document.getElementById('btnGateClose').addEventListener('click', closeStageGate);
+document.getElementById('stageGate').addEventListener('click', (e) => {
+  if (e.target.id === 'stageGate') closeStageGate(); // click on the backdrop, not the card — same as the records modal
+});
+document.getElementById('btnHdrNextStage').addEventListener('click', closeStageGateAndStart);
 
 function endGame(won) {
   gameOver = true;
@@ -2894,6 +3042,9 @@ function returnToSetup() {
   clearInterval(timerInterval);
   document.getElementById('endBanner').classList.remove('open');
   document.getElementById('stageGate').classList.remove('open'); // in case "New Game" is hit mid-pause
+  document.getElementById('cellReviewModal').classList.remove('open');
+  reviewingStage = false;
+  document.getElementById('btnHdrNextStage').style.display = 'none';
   document.getElementById('appRoot').style.display = 'none';
   document.getElementById('setupPanel').style.display = 'flex';
   phase = 'setup';
